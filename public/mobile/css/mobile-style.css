@@ -1,0 +1,95 @@
+/* ---------- Mobile app shell ---------- */
+
+body.mobile-app {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+body.mobile-app main {
+  max-width: 640px;
+  padding: 1.25rem 1rem 6rem; /* extra bottom padding clears the fixed bottom nav */
+}
+
+body.mobile-app .topbar {
+  padding: 0.85rem 1rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+body.mobile-app .topbar h1 {
+  font-size: 1.02rem;
+}
+
+body.mobile-app .user-info {
+  font-size: 0.78rem;
+}
+
+/* Bigger tap targets everywhere on mobile */
+body.mobile-app button,
+body.mobile-app input,
+body.mobile-app select {
+  min-height: 44px;
+}
+
+body.mobile-app .action-row {
+  flex-wrap: wrap;
+}
+
+body.mobile-app .action-row button {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* Tables scroll horizontally instead of squeezing/wrapping on small screens */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1.5rem;
+}
+
+.table-scroll .cart-table {
+  margin-bottom: 0;
+  min-width: 560px;
+}
+
+/* ---------- Bottom navigation ---------- */
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 200;
+  display: flex;
+  background: var(--ink);
+  border-top: 3px solid var(--amber);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.bottom-nav .tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  background: transparent;
+  border: none;
+  border-bottom: none;
+  padding: 0.6rem 0.4rem 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.bottom-nav .tab-btn.active {
+  color: var(--amber);
+}
+
+.bottom-nav .bn-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+/* Scan icon button and scanner modal styles now live in the shared
+   public/css/style.css so the desktop dashboard can use them too. */

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1B2430">
+  <title>Log In · Equipment Inventory</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/mobile-style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <h1>Equipment Inventory</h1>
+    <p class="subtitle">Employee Sign-In</p>
+
+    <form id="loginForm">
+      <label for="employeeId">Employee ID</label>
+      <input type="text" id="employeeId" autocomplete="username" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+
+      <button type="submit">Log In</button>
+      <p id="loginError" class="error-text"></p>
+    </form>
+    <button id="showRegister" type="button" class="link-btn">New employee? Register here</button>
+
+    <form id="registerForm" class="hidden">
+      <label for="regId">Employee ID</label>
+      <input type="text" id="regId" required>
+
+      <label for="regName">Full Name</label>
+      <input type="text" id="regName" required>
+
+      <label for="regPassword">Password</label>
+      <input type="password" id="regPassword" required>
+
+      <button type="submit">Register</button>
+      <p id="registerError" class="error-text"></p>
+      <p id="registerSuccess" class="success-text"></p>
+    </form>
+    <button id="showLogin" type="button" class="link-btn hidden">Back to login</button>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/mobile-login.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>

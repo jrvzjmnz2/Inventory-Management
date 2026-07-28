@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard · Equipment Inventory</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Equipment Inventory</h1>
+    <div class="user-info">
+      <span id="welcomeText"></span>
+      <button id="logoutBtn" type="button">Log Out</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="borrow" type="button">Borrow</button>
+    <button class="tab-btn" data-tab="return" type="button">Return</button>
+    <button class="tab-btn" data-tab="inventory" type="button">View Inventory</button>
+  </nav>
+
+  <main>
+    <!-- ============ BORROW TAB ============ -->
+    <section id="borrow" class="tab-panel active">
+      <h2>Borrow Equipment</h2>
+
+      <div class="input-row">
+        <input type="text" id="borrowInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <button id="borrowAddBtn" type="button">Add</button>
+        <button id="scanBorrowBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+        </button>
+      </div>
+      <p id="borrowMessage" class="message"></p>
+
+      <h3>Equipment Cart</h3>
+      <table class="cart-table">
+        <thead>
+          <tr><th>Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
+        </thead>
+        <tbody id="borrowCartBody">
+          <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Miscellaneous Items</h3>
+      <div class="misc-checklist" id="miscChecklist"></div>
+
+      <h3>Purpose</h3>
+      <div class="input-row">
+        <select id="purposeSelect">
+          <option value="" disabled selected>Select a purpose…</option>
+          <option value="Entractiv">Entractiv</option>
+          <option value="Fulfillment">Fulfillment</option>
+          <option value="Timing">Timing</option>
+          <option value="Bib Production">Bib Production</option>
+          <option value="Office & Admin">Office &amp; Admin</option>
+          <option value="Kit Claiming">Kit Claiming</option>
+        </select>
+        <input type="text" id="eventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
+      </div>
+
+      <div class="action-row">
+        <button id="borrowCompleteBtn" type="button" class="primary-btn">Complete</button>
+        <button id="exportBtn" type="button" class="primary-btn" disabled>Export to Word</button>
+      </div>
+      <p id="borrowStatusMessage" class="message"></p>
+    </section>
+
+    <!-- ============ RETURN TAB ============ -->
+    <section id="return" class="tab-panel">
+      <h2>Return Equipment</h2>
+
+      <div class="input-row">
+        <input type="text" id="returnInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <button id="returnAddBtn" type="button">Add</button>
+        <button id="scanReturnBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+        </button>
+      </div>
+      <p id="returnMessage" class="message"></p>
+
+      <h3>Return Cart</h3>
+      <table class="cart-table">
+        <thead>
+          <tr><th>Equipment ID</th><th>Item</th><th>Current Borrower</th><th></th></tr>
+        </thead>
+        <tbody id="returnCartBody">
+          <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="action-row">
+        <button id="returnCompleteBtn" type="button" class="primary-btn">Complete</button>
+      </div>
+      <p id="returnStatusMessage" class="message"></p>
+    </section>
+
+    <!-- ============ VIEW INVENTORY TAB ============ -->
+    <section id="inventory" class="tab-panel">
+      <h2>View Inventory</h2>
+      <div class="action-row">
+        <button id="refreshInventoryBtn" type="button" class="secondary-btn">Refresh</button>
+        <button id="clearFiltersBtn" type="button" class="secondary-btn">Clear Filters</button>
+      </div>
+      <p id="inventoryMessage" class="message"></p>
+      <table class="cart-table">
+        <thead>
+          <tr>
+            <th>Equipment ID</th>
+            <th>Item</th>
+            <th>Status</th>
+            <th>Comment</th>
+            <th>Additional Information</th>
+            <th>Borrowed By</th>
+            <th>Event</th>
+            <th>Last Person Borrowed</th>
+            <th>Last Date Borrowed</th>
+          </tr>
+          <tr class="filter-row">
+            <th><input type="text" class="col-filter" data-col="equipmentId" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="item" placeholder="Filter…"></th>
+            <th>
+              <select class="col-filter" data-col="status">
+                <option value="">All</option>
+                <option value="Available">Available</option>
+                <option value="Unavailable">Unavailable</option>
+              </select>
+            </th>
+            <th><input type="text" class="col-filter" data-col="comment" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="additionalInfo" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="borrower" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="event" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="lastBorrowedByName" placeholder="Filter…"></th>
+            <th><input type="text" class="col-filter" data-col="lastBorrowedAt" placeholder="Filter…"></th>
+          </tr>
+        </thead>
+        <tbody id="inventoryBody">
+          <tr class="empty-row"><td colspan="9">Loading inventory…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <!-- ============ SCANNER MODAL ============ -->
+  <div id="scannerModal" class="scanner-modal hidden">
+    <div class="scanner-card">
+      <h3>Scan Barcode</h3>
+      <div id="scannerViewport" class="scanner-viewport"></div>
+      <p class="scanner-hint">Align the barcode within the frame</p>
+      <p id="scannerError" class="error-text"></p>
+      <button id="scannerCloseBtn" type="button" class="secondary-btn">Cancel</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

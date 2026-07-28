@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log In · Equipment Inventory</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <h1>Equipment Inventory</h1>
+    <p class="subtitle">Employee Sign-In</p>
+
+    <form id="loginForm">
+      <label for="employeeId">Employee ID</label>
+      <input type="text" id="employeeId" autocomplete="username" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+
+      <button type="submit">Log In</button>
+      <p id="loginError" class="error-text"></p>
+    </form>
+    <button id="showRegister" type="button" class="link-btn">New employee? Register here</button>
+
+    <form id="registerForm" class="hidden">
+      <label for="regId">Employee ID</label>
+      <input type="text" id="regId" required>
+
+      <label for="regName">Full Name</label>
+      <input type="text" id="regName" required>
+
+      <label for="regPassword">Password</label>
+      <input type="password" id="regPassword" required>
+
+      <button type="submit">Register</button>
+      <p id="registerError" class="error-text"></p>
+      <p id="registerSuccess" class="success-text"></p>
+    </form>
+    <button id="showLogin" type="button" class="link-btn hidden">Back to login</button>
+  </div>
+
+  <script src="js/login.js"></script>
+</body>
+</html>

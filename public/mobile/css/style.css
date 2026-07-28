@@ -1,0 +1,614 @@
+/* This is a copy of ../../css/style.css (the shared desktop stylesheet).
+
+   Why a copy instead of just linking to the original: when this app is
+   packaged as a standalone Capacitor Android app, only the contents of
+   public/mobile get bundled into the app - a path like "../css/style.css"
+   would point outside that bundle and 404 once the app is installed on a
+   phone with no dev server/tunnel behind it.
+
+   If you change public/css/style.css, re-run:
+     npm run sync-mobile-css
+   to copy the changes here too. */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+  --ink: #1B2430;
+  --ink-soft: #4B5768;
+  --bg: #EDEFF2;
+  --surface: #FFFFFF;
+  --line: #D6DAE1;
+  --amber: #E3A008;
+  --amber-dark: #B87D05;
+  --teal: #0F7173;
+  --danger: #C1443C;
+  --danger-bg: #FBEAE9;
+  --success-bg: #EAF5EE;
+
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.01em;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--amber-dark);
+  outline-offset: 2px;
+}
+
+/* ---------- Login page ---------- */
+
+.login-body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(135deg, rgba(27,36,48,0.03) 0 2px, transparent 2px 14px),
+    var(--bg);
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  border-top: 4px solid var(--amber);
+  padding: 2.5rem 2.5rem 2rem;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 12px 28px rgba(27, 36, 48, 0.08);
+}
+
+.login-card h1 {
+  font-size: 1.5rem;
+}
+
+.subtitle {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin: 0 0 1.75rem 0;
+}
+
+#loginForm label,
+#registerForm label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 1rem 0 0.35rem;
+  color: var(--ink-soft);
+}
+
+#loginForm input,
+#registerForm input {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 0.95rem;
+  font-family: var(--font-mono);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#loginForm button[type="submit"],
+#registerForm button[type="submit"] {
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 0.7rem;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background 0.15s ease;
+}
+
+#loginForm button[type="submit"]:hover,
+#registerForm button[type="submit"]:hover {
+  background: var(--amber-dark);
+}
+
+.link-btn {
+  display: block;
+  margin: 1rem auto 0;
+  background: none;
+  border: none;
+  color: var(--teal);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  min-height: 1em;
+}
+
+.success-text {
+  color: var(--teal);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  min-height: 1em;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Dashboard shell ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--ink);
+  color: #fff;
+  padding: 1rem 1.75rem;
+  border-bottom: 4px solid var(--amber);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.topbar h1 {
+  font-size: 1.15rem;
+  color: #fff;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.user-info button {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  padding: 0.4rem 0.8rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.user-info button:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1.75rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.85rem 1.1rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.tab-btn.active {
+  color: var(--ink);
+  border-bottom-color: var(--amber);
+}
+
+main {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 2rem 1.75rem 4rem;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ---------- Shared form bits ---------- */
+
+.input-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.input-row input[type="text"] {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  background: var(--surface);
+}
+
+button.primary-btn,
+.input-row > button:first-of-type,
+#borrowAddBtn,
+#returnAddBtn {
+  background: var(--ink);
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.1rem;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+button.primary-btn:hover,
+#borrowAddBtn:hover,
+#returnAddBtn:hover {
+  background: var(--amber-dark);
+}
+
+/* ---------- Scan icon button ---------- */
+
+.input-row .scan-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 42px;
+  padding: 0;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+}
+
+.input-row .scan-btn:hover {
+  background: #0b5b5c;
+}
+
+.input-row .scan-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+/* ---------- Scanner modal ---------- */
+
+.scanner-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(11, 15, 20, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.scanner-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.scanner-card h3 {
+  margin-bottom: 0.75rem;
+}
+
+.scanner-viewport {
+  width: 100%;
+  min-height: 260px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+}
+
+/* html5-qrcode injects <video>/<canvas> here; keep them contained */
+.scanner-viewport video,
+.scanner-viewport canvas {
+  width: 100% !important;
+  border-radius: 4px;
+}
+
+.scanner-hint {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  margin: 0.75rem 0 0.25rem;
+}
+
+.scanner-card .secondary-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+button.primary-btn:disabled {
+  background: var(--line);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+button.secondary-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.6rem 1rem;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+button.secondary-btn:hover {
+  border-color: var(--ink-soft);
+}
+
+.message {
+  min-height: 1.4em;
+  font-size: 0.88rem;
+  margin: 0.4rem 0 1rem;
+}
+
+.message.error { color: var(--danger); }
+.message.success { color: var(--teal); }
+
+.misc-checklist {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--teal);
+  border-radius: 4px;
+  padding: 0.25rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.misc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.misc-row:last-child {
+  border-bottom: none;
+}
+
+.misc-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.misc-checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+.misc-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.stepper-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+}
+
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  min-width: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.misc-row.disabled .misc-stepper {
+  opacity: 0.5;
+}
+
+/* ---------- Tables ---------- */
+
+.cart-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.cart-table th {
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  background: var(--bg);
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.cart-table td {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+  vertical-align: middle;
+}
+
+.cart-table tbody tr:last-child td { border-bottom: none; }
+.cart-table tbody tr:nth-child(even) { background: #FAFBFC; }
+
+.filter-row th {
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  font-weight: 400;
+}
+
+.col-filter {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.col-filter::placeholder {
+  color: var(--ink-soft);
+}
+
+.tag-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.82rem;
+  background: var(--bg);
+  border: 1px dashed var(--ink-soft);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+}
+
+.status-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-available {
+  background: var(--success-bg);
+  color: #1E7A43;
+}
+
+.status-unavailable {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.remove-btn {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.empty-row td {
+  text-align: center;
+  color: var(--ink-soft);
+  font-style: italic;
+  padding: 1.25rem;
+}
+
+.comment-input {
+  width: 100%;
+  min-width: 140px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  color: var(--ink);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.comment-input:hover {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.comment-input:focus {
+  border-color: var(--ink-soft);
+  background: var(--surface);
+  outline: none;
+}
+
+.comment-input:disabled {
+  opacity: 0.6;
+}
+
+.comment-input.comment-saved {
+  border-color: var(--teal);
+  background: var(--success-bg);
+}
+
+.comment-input.comment-error {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+@media (max-width: 640px) {
+  .topbar { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
+  .tabs { overflow-x: auto; }
+  .cart-table { font-size: 0.82rem; }
+}
