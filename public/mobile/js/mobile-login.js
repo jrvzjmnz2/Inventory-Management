@@ -53,6 +53,7 @@ registerForm.addEventListener('submit', async (e) => {
   const employeeId = document.getElementById('regId').value.trim();
   const name = document.getElementById('regName').value.trim();
   const password = document.getElementById('regPassword').value;
+  const accessCode = document.getElementById('regAccessCode').value;
   const errEl = document.getElementById('registerError');
   const okEl = document.getElementById('registerSuccess');
   errEl.textContent = '';
@@ -62,7 +63,7 @@ registerForm.addEventListener('submit', async (e) => {
     const res = await fetch(apiUrl('/api/auth/register'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ employeeId, name, password })
+      body: JSON.stringify({ employeeId, name, password, accessCode })
     });
     const data = await res.json();
 

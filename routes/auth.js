@@ -5,12 +5,20 @@ const { COLLECTIONS } = require('../constants');
 
 const router = express.Router();
 
+// Registration is gated by a shared access code so the public-facing login
+// link can't be used by strangers to create accounts on their own.
+const ACCESS_CODE = process.env.ACCESS_CODE || 'it3mh0und';
+
 // Register a new employee (convenience endpoint so the login page is self-service)
 router.post('/register', async (req, res) => {
   try {
-    const { employeeId, name, password } = req.body;
-    if (!employeeId || !name || !password) {
-      return res.status(400).json({ message: 'Employee ID, name, and password are required.' });
+    const { employeeId, name, password, accessCode } = req.body;
+    if (!employeeId || !name || !password || !accessCode) {
+      return res.status(400).json({ message: 'Employee ID, name, password, and access code are required.' });
+    }
+
+    if (accessCode !== ACCESS_CODE) {
+      return res.status(403).json({ message: 'Invalid access code.' });
     }
 
     const employees = getDb().collection(COLLECTIONS.EMPLOYEES);
