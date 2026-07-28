@@ -11,7 +11,7 @@
 // Update this once you've deployed server.js (e.g. to Render, Railway,
 // Fly.io, or your own server) - then run `npx cap sync android` and rebuild
 // the app so the change takes effect.
-const API_BASE_URL = 'https://REPLACE-WITH-YOUR-DEPLOYED-BACKEND-URL';
+const API_BASE_URL = 'https://inventory-management-atyc.onrender.com';
 
 function apiUrl(path) {
   return `${API_BASE_URL}${path}`;
