@@ -7,6 +7,7 @@ const { connectToDatabase, DB_NAME } = require('./db');
 const authRoutes = require('./routes/auth');
 const equipmentRoutes = require('./routes/equipment');
 const borrowRoutes = require('./routes/borrow');
+const reserveRoutes = require('./routes/reserve');
 const returnRoutes = require('./routes/return');
 const exportRoutes = require('./routes/export');
 
@@ -20,6 +21,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/equipment', equipmentRoutes);
 app.use('/api/borrow', borrowRoutes);
+app.use('/api/reserve', reserveRoutes);
 app.use('/api/return', returnRoutes);
 app.use('/api/export', exportRoutes);
 

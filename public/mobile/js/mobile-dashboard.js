@@ -62,80 +62,86 @@ const exportBtn = document.getElementById('exportBtn');
 const borrowStatusMessage = document.getElementById('borrowStatusMessage');
 const purposeSelect = document.getElementById('purposeSelect');
 const eventInput = document.getElementById('eventInput');
-const miscChecklist = document.getElementById('miscChecklist');
 
-// Build the fixed checklist of miscellaneous items: a checkbox plus a
-// +/- quantity stepper per row. The checked rows *are* the miscellaneous
-// cart - there's no separate "add to cart" step.
-miscChecklist.innerHTML = MISC_ITEMS.map(
-  (item, idx) => `
-    <div class="misc-row disabled" data-item="${escapeHtml(item)}">
-      <label class="misc-checkbox-label">
-        <input type="checkbox" class="misc-check" data-idx="${idx}">
-        <span>${escapeHtml(item)}</span>
-      </label>
-      <div class="misc-stepper">
-        <button type="button" class="stepper-btn misc-minus" data-idx="${idx}" disabled>−</button>
-        <span class="stepper-value" id="miscQty-${idx}">1</span>
-        <button type="button" class="stepper-btn misc-plus" data-idx="${idx}" disabled>+</button>
-      </div>
-    </div>`
-).join('');
+// Builds a fixed checklist of miscellaneous items inside `containerEl`: a
+// checkbox plus a +/- quantity stepper per row. The checked rows *are* the
+// miscellaneous cart - there's no separate "add to cart" step. Used for both
+// the Borrow and Reserve tabs, each with their own container element and
+// independent state (DOM traversal only, no shared IDs, so two instances
+// never collide).
+function createMiscChecklist(containerEl) {
+  containerEl.innerHTML = MISC_ITEMS.map(
+    (item, idx) => `
+      <div class="misc-row disabled" data-item="${escapeHtml(item)}">
+        <label class="misc-checkbox-label">
+          <input type="checkbox" class="misc-check" data-idx="${idx}">
+          <span>${escapeHtml(item)}</span>
+        </label>
+        <div class="misc-stepper">
+          <button type="button" class="stepper-btn misc-minus" data-idx="${idx}" disabled>−</button>
+          <span class="stepper-value">1</span>
+          <button type="button" class="stepper-btn misc-plus" data-idx="${idx}" disabled>+</button>
+        </div>
+      </div>`
+  ).join('');
 
-miscChecklist.querySelectorAll('.misc-check').forEach((checkbox) => {
-  checkbox.addEventListener('change', () => {
-    const idx = checkbox.dataset.idx;
-    const row = checkbox.closest('.misc-row');
-    const minusBtn = row.querySelector('.misc-minus');
-    const plusBtn = row.querySelector('.misc-plus');
-    minusBtn.disabled = !checkbox.checked;
-    plusBtn.disabled = !checkbox.checked;
-    row.classList.toggle('disabled', !checkbox.checked);
-    if (!checkbox.checked) {
-      document.getElementById(`miscQty-${idx}`).textContent = '1';
-    }
+  containerEl.querySelectorAll('.misc-check').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const row = checkbox.closest('.misc-row');
+      const minusBtn = row.querySelector('.misc-minus');
+      const plusBtn = row.querySelector('.misc-plus');
+      minusBtn.disabled = !checkbox.checked;
+      plusBtn.disabled = !checkbox.checked;
+      row.classList.toggle('disabled', !checkbox.checked);
+      if (!checkbox.checked) {
+        row.querySelector('.stepper-value').textContent = '1';
+      }
+    });
   });
-});
 
-miscChecklist.querySelectorAll('.misc-minus').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const qtyEl = document.getElementById(`miscQty-${btn.dataset.idx}`);
-    const current = parseInt(qtyEl.textContent, 10);
-    if (current > 1) qtyEl.textContent = String(current - 1);
+  containerEl.querySelectorAll('.misc-minus').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const qtyEl = btn.closest('.misc-row').querySelector('.stepper-value');
+      const current = parseInt(qtyEl.textContent, 10);
+      if (current > 1) qtyEl.textContent = String(current - 1);
+    });
   });
-});
 
-miscChecklist.querySelectorAll('.misc-plus').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const qtyEl = document.getElementById(`miscQty-${btn.dataset.idx}`);
-    const current = parseInt(qtyEl.textContent, 10);
-    qtyEl.textContent = String(current + 1);
+  containerEl.querySelectorAll('.misc-plus').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const qtyEl = btn.closest('.misc-row').querySelector('.stepper-value');
+      const current = parseInt(qtyEl.textContent, 10);
+      qtyEl.textContent = String(current + 1);
+    });
   });
-});
 
-function getCheckedMiscItems() {
-  const result = [];
-  miscChecklist.querySelectorAll('.misc-check').forEach((checkbox) => {
-    if (checkbox.checked) {
-      const idx = checkbox.dataset.idx;
-      const amount = parseInt(document.getElementById(`miscQty-${idx}`).textContent, 10);
-      result.push({ item: MISC_ITEMS[idx], amount });
-    }
-  });
-  return result;
+  function getCheckedItems() {
+    const result = [];
+    containerEl.querySelectorAll('.misc-check').forEach((checkbox) => {
+      if (checkbox.checked) {
+        const idx = checkbox.dataset.idx;
+        const amount = parseInt(checkbox.closest('.misc-row').querySelector('.stepper-value').textContent, 10);
+        result.push({ item: MISC_ITEMS[idx], amount });
+      }
+    });
+    return result;
+  }
+
+  function reset() {
+    containerEl.querySelectorAll('.misc-check').forEach((checkbox) => {
+      checkbox.checked = false;
+      const row = checkbox.closest('.misc-row');
+      row.querySelector('.stepper-value').textContent = '1';
+      row.classList.add('disabled');
+      row.querySelector('.misc-minus').disabled = true;
+      row.querySelector('.misc-plus').disabled = true;
+    });
+  }
+
+  return { getCheckedItems, reset };
 }
 
-function resetMiscChecklist() {
-  miscChecklist.querySelectorAll('.misc-check').forEach((checkbox) => {
-    checkbox.checked = false;
-    const idx = checkbox.dataset.idx;
-    document.getElementById(`miscQty-${idx}`).textContent = '1';
-    const row = checkbox.closest('.misc-row');
-    row.classList.add('disabled');
-    row.querySelector('.misc-minus').disabled = true;
-    row.querySelector('.misc-plus').disabled = true;
-  });
-}
+const borrowMisc = createMiscChecklist(document.getElementById('miscChecklist'));
 
 borrowInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
@@ -216,7 +222,7 @@ function renderBorrowCart() {
 borrowCompleteBtn.addEventListener('click', async () => {
   setMessage(borrowStatusMessage, '', null);
 
-  const miscItems = getCheckedMiscItems();
+  const miscItems = borrowMisc.getCheckedItems();
 
   if (borrowCart.length === 0 && miscItems.length === 0) {
     setMessage(borrowStatusMessage, 'Add at least one item before completing.', 'error');
@@ -269,7 +275,7 @@ borrowCompleteBtn.addEventListener('click', async () => {
     purposeSelect.value = '';
     eventInput.value = '';
     renderBorrowCart();
-    resetMiscChecklist();
+    borrowMisc.reset();
     exportBtn.disabled = false;
   } catch (err) {
     setMessage(borrowStatusMessage, 'Could not reach the server.', 'error');
@@ -342,8 +348,8 @@ async function handleReturnAdd() {
       return;
     }
 
-    if (data.status !== 'Unavailable') {
-      setMessage(returnMessage, `"${data.item}" (${data.equipmentId}) is not currently borrowed.`, 'error');
+    if (data.status !== 'Unavailable' && data.status !== 'Reserved') {
+      setMessage(returnMessage, `"${data.item}" (${data.equipmentId}) is not currently borrowed or reserved.`, 'error');
       return;
     }
 
@@ -416,6 +422,173 @@ returnCompleteBtn.addEventListener('click', async () => {
     renderReturnCart();
   } catch (err) {
     setMessage(returnStatusMessage, 'Could not reach the server.', 'error');
+  }
+});
+
+// =======================================================
+// RESERVE TAB
+// =======================================================
+// Reserving equipment doesn't check it out the way Borrow does - it just
+// flags it (yellow "Reserved" tag) as held for a future date/event. The
+// Return tab is what releases a reservation back to Available later.
+let reserveCart = []; // { equipmentId, item, comment }
+
+const reserveInput = document.getElementById('reserveInput');
+const reserveAddBtn = document.getElementById('reserveAddBtn');
+const reserveMessage = document.getElementById('reserveMessage');
+const reserveCartBody = document.getElementById('reserveCartBody');
+const reserveCompleteBtn = document.getElementById('reserveCompleteBtn');
+const reserveStatusMessage = document.getElementById('reserveStatusMessage');
+const reservePurposeSelect = document.getElementById('reservePurposeSelect');
+const reserveEventInput = document.getElementById('reserveEventInput');
+const reserveDateInput = document.getElementById('reserveDateInput');
+const reserveMisc = createMiscChecklist(document.getElementById('miscChecklistReserve'));
+
+reserveInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleReserveAdd();
+  }
+});
+reserveAddBtn.addEventListener('click', handleReserveAdd);
+
+async function handleReserveAdd() {
+  const id = reserveInput.value.trim();
+  setMessage(reserveMessage, '', null);
+
+  if (!id) {
+    setMessage(reserveMessage, 'Enter an Equipment ID first.', 'error');
+    return;
+  }
+  if (reserveCart.some((c) => c.equipmentId === id)) {
+    setMessage(reserveMessage, `Equipment "${id}" is already in your cart.`, 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(apiUrl(`/api/equipment/${encodeURIComponent(id)}`));
+    const data = await res.json();
+
+    if (!res.ok) {
+      setMessage(reserveMessage, data.message || 'Equipment not found.', 'error');
+      return;
+    }
+
+    if (data.status !== 'Available') {
+      let reason;
+      if (data.status === 'Reserved') {
+        reason = `is already reserved${data.event ? ` for "${data.event}"` : ''}${data.comment ? ` (needed ${data.comment})` : ''}`;
+      } else {
+        const borrower = data.employeeName
+          ? `${data.employeeName} (${data.employeeId})`
+          : data.employeeId || 'another employee';
+        reason = `is currently borrowed by ${borrower}`;
+      }
+      setMessage(reserveMessage, `"${data.item}" (${data.equipmentId}) ${reason}. Please select another item.`, 'error');
+      return;
+    }
+
+    reserveCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
+    reserveInput.value = '';
+    setMessage(reserveMessage, `Added "${data.item}" (${data.equipmentId}) to cart.`, 'success');
+    renderReserveCart();
+  } catch (err) {
+    setMessage(reserveMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+function renderReserveCart() {
+  if (reserveCart.length === 0) {
+    reserveCartBody.innerHTML = '<tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>';
+    return;
+  }
+  reserveCartBody.innerHTML = reserveCart
+    .map(
+      (c, idx) => `
+      <tr>
+        <td><span class="tag-chip">${escapeHtml(c.equipmentId)}</span></td>
+        <td>${escapeHtml(c.item)}</td>
+        <td>${escapeHtml(c.comment) || '-'}</td>
+        <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
+      </tr>`
+    )
+    .join('');
+
+  reserveCartBody.querySelectorAll('.remove-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      reserveCart.splice(Number(btn.dataset.idx), 1);
+      renderReserveCart();
+    });
+  });
+}
+
+reserveCompleteBtn.addEventListener('click', async () => {
+  setMessage(reserveStatusMessage, '', null);
+
+  const miscItems = reserveMisc.getCheckedItems();
+
+  if (reserveCart.length === 0 && miscItems.length === 0) {
+    setMessage(reserveStatusMessage, 'Add at least one item before completing.', 'error');
+    return;
+  }
+
+  const purpose = reservePurposeSelect.value;
+  if (reserveCart.length > 0 && !purpose) {
+    setMessage(reserveStatusMessage, 'Select a Purpose before completing the reservation.', 'error');
+    return;
+  }
+
+  const eventValue = reserveEventInput.value.trim();
+  if (reserveCart.length > 0 && !eventValue) {
+    setMessage(reserveStatusMessage, 'Enter an Event before completing the reservation.', 'error');
+    return;
+  }
+
+  const dateValue = reserveDateInput.value;
+  if (reserveCart.length > 0 && !dateValue) {
+    setMessage(reserveStatusMessage, 'Select a date before completing the reservation.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(apiUrl('/api/reserve/complete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeId,
+        purpose: purpose || null,
+        event: eventValue || null,
+        date: dateValue || null,
+        equipmentIds: reserveCart.map((c) => c.equipmentId),
+        miscItems
+      })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data.conflicts) {
+        const lines = data.conflicts.map((c) => {
+          if (c.reason === 'unavailable') {
+            return `${c.equipmentId} is no longer available.`;
+          }
+          return `${c.equipmentId} was not found.`;
+        });
+        setMessage(reserveStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
+      } else {
+        setMessage(reserveStatusMessage, data.message || 'Could not complete the reservation.', 'error');
+      }
+      return;
+    }
+
+    setMessage(reserveStatusMessage, 'Reservation completed successfully.', 'success');
+    reserveCart = [];
+    reservePurposeSelect.value = '';
+    reserveEventInput.value = '';
+    reserveDateInput.value = '';
+    renderReserveCart();
+    reserveMisc.reset();
+  } catch (err) {
+    setMessage(reserveStatusMessage, 'Could not reach the server.', 'error');
   }
 });
 
@@ -517,7 +690,8 @@ function renderInventoryRows(items) {
 
   inventoryBody.innerHTML = items
     .map((i) => {
-      const pillClass = i.status === 'Available' ? 'status-available' : 'status-unavailable';
+      const pillClass =
+        i.status === 'Available' ? 'status-available' : i.status === 'Reserved' ? 'status-reserved' : 'status-unavailable';
       const borrower = i.employeeId ? `${escapeHtml(i.employeeName)} (${escapeHtml(i.employeeId)})` : '-';
       const lastBorrower = i.lastBorrowedBy
         ? `${escapeHtml(i.lastBorrowedByName)} (${escapeHtml(i.lastBorrowedBy)})`
@@ -630,6 +804,7 @@ loadInventory();
 // availability check as a typed-in ID.
 const scanBorrowBtn = document.getElementById('scanBorrowBtn');
 const scanReturnBtn = document.getElementById('scanReturnBtn');
+const scanReserveBtn = document.getElementById('scanReserveBtn');
 const scannerModal = document.getElementById('scannerModal');
 const scannerCloseBtn = document.getElementById('scannerCloseBtn');
 const scannerError = document.getElementById('scannerError');
@@ -638,6 +813,7 @@ let scanTarget = null; // { input, handler } - which tab requested the scan
 
 scanBorrowBtn.addEventListener('click', () => startScanner(borrowInput, handleBorrowAdd));
 scanReturnBtn.addEventListener('click', () => startScanner(returnInput, handleReturnAdd));
+scanReserveBtn.addEventListener('click', () => startScanner(reserveInput, handleReserveAdd));
 scannerCloseBtn.addEventListener('click', stopScanner);
 
 async function startScanner(inputEl, addHandler) {

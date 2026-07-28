@@ -24,6 +24,7 @@
   --danger: #C1443C;
   --danger-bg: #FBEAE9;
   --success-bg: #EAF5EE;
+  --warning-bg: #FDF1D6;
 
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'Inter', sans-serif;
@@ -545,6 +546,11 @@ button.secondary-btn:hover {
 .status-unavailable {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.status-reserved {
+  background: var(--warning-bg);
+  color: var(--amber-dark);
 }
 
 .remove-btn {

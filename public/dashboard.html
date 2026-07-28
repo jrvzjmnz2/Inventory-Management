@@ -18,6 +18,7 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="borrow" type="button">Borrow</button>
     <button class="tab-btn" data-tab="return" type="button">Return</button>
+    <button class="tab-btn" data-tab="reserve" type="button">Reserve</button>
     <button class="tab-btn" data-tab="inventory" type="button">View Inventory</button>
   </nav>
 
@@ -98,6 +99,57 @@
       <p id="returnStatusMessage" class="message"></p>
     </section>
 
+    <!-- ============ RESERVE TAB ============ -->
+    <section id="reserve" class="tab-panel">
+      <h2>Reserve Equipment</h2>
+
+      <div class="input-row">
+        <input type="text" id="reserveInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <button id="reserveAddBtn" type="button">Add</button>
+        <button id="scanReserveBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+        </button>
+      </div>
+      <p id="reserveMessage" class="message"></p>
+
+      <h3>Equipment Cart</h3>
+      <table class="cart-table">
+        <thead>
+          <tr><th>Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
+        </thead>
+        <tbody id="reserveCartBody">
+          <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Miscellaneous Items</h3>
+      <div class="misc-checklist" id="miscChecklistReserve"></div>
+
+      <h3>Purpose</h3>
+      <div class="input-row">
+        <select id="reservePurposeSelect">
+          <option value="" disabled selected>Select a purpose…</option>
+          <option value="Entractiv">Entractiv</option>
+          <option value="Fulfillment">Fulfillment</option>
+          <option value="Timing">Timing</option>
+          <option value="Bib Production">Bib Production</option>
+          <option value="Office & Admin">Office &amp; Admin</option>
+          <option value="Kit Claiming">Kit Claiming</option>
+        </select>
+        <input type="text" id="reserveEventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
+      </div>
+
+      <h3>Date Needed</h3>
+      <div class="input-row">
+        <input type="date" id="reserveDateInput">
+      </div>
+
+      <div class="action-row">
+        <button id="reserveCompleteBtn" type="button" class="primary-btn">Complete</button>
+      </div>
+      <p id="reserveStatusMessage" class="message"></p>
+    </section>
+
     <!-- ============ VIEW INVENTORY TAB ============ -->
     <section id="inventory" class="tab-panel">
       <h2>View Inventory</h2>
@@ -127,6 +179,7 @@
                 <option value="">All</option>
                 <option value="Available">Available</option>
                 <option value="Unavailable">Unavailable</option>
+                <option value="Reserved">Reserved</option>
               </select>
             </th>
             <th><input type="text" class="col-filter" data-col="comment" placeholder="Filter…"></th>
