@@ -197,6 +197,9 @@ select:focus-visible {
   padding: 0 1.75rem;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 65px;
+  z-index: 100;
 }
 
 .tab-btn {
