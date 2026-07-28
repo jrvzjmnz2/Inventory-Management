@@ -664,10 +664,19 @@ async function startScanner(inputEl, addHandler) {
     );
   } catch (err) {
     console.warn('Camera start failed with a resolution hint, retrying with a plain camera request:', err);
+    // Html5Qrcode doesn't support calling start() a second time on the same
+    // instance that already failed once - retrying on it produces a vague,
+    // unhelpful error that masks the real one above. Use a fresh instance.
+    try {
+      activeScanner.clear();
+    } catch (cleanupErr) {
+      // ignore - the failed instance may not have anything to clean up
+    }
+    activeScanner = new Html5Qrcode('scannerViewport');
     try {
       await activeScanner.start({ facingMode: 'environment' }, scanConfig, onScanSuccess, () => {});
     } catch (err2) {
-      console.error('Camera start failed:', err2);
+      console.error('Camera start failed on retry too:', err2);
       scannerError.textContent = `Could not access the camera: ${err2.name || 'Error'}${err2.message ? ' - ' + err2.message : ''}`;
     }
   }
