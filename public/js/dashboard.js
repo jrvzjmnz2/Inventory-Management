@@ -30,6 +30,35 @@ function setMessage(el, text, type) {
   if (type) el.classList.add(type);
 }
 
+// ---------- Shared confirmation modal ----------
+// Used by the Complete button on every tab so nothing gets finalized
+// without an explicit "yes". Returns a Promise<boolean> - true if the user
+// confirmed, false if they cancelled.
+const confirmModal = document.getElementById('confirmModal');
+const confirmMessage = document.getElementById('confirmMessage');
+const confirmOkBtn = document.getElementById('confirmOkBtn');
+const confirmCancelBtn = document.getElementById('confirmCancelBtn');
+let resolveConfirm = null;
+
+function askConfirm(message) {
+  confirmMessage.textContent = message;
+  confirmModal.classList.remove('hidden');
+  return new Promise((resolve) => {
+    resolveConfirm = resolve;
+  });
+}
+
+function settleConfirm(result) {
+  confirmModal.classList.add('hidden');
+  if (resolveConfirm) {
+    resolveConfirm(result);
+    resolveConfirm = null;
+  }
+}
+
+confirmOkBtn.addEventListener('click', () => settleConfirm(true));
+confirmCancelBtn.addEventListener('click', () => settleConfirm(false));
+
 // ---------- Tab switching ----------
 const tabButtons = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
@@ -241,6 +270,12 @@ borrowCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
+  const itemCount = borrowCart.length + miscItems.length;
+  const confirmed = await askConfirm(
+    `Complete this borrow of ${itemCount} item${itemCount === 1 ? '' : 's'}? The selected equipment will be marked as unavailable.`
+  );
+  if (!confirmed) return;
+
   try {
     const res = await fetch('/api/borrow/complete', {
       method: 'POST',
@@ -399,6 +434,11 @@ returnCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
+  const confirmed = await askConfirm(
+    `Complete this return of ${returnCart.length} item${returnCart.length === 1 ? '' : 's'}? The selected equipment will be marked as available again.`
+  );
+  if (!confirmed) return;
+
   try {
     const res = await fetch('/api/return/complete', {
       method: 'POST',
@@ -549,6 +589,12 @@ reserveCompleteBtn.addEventListener('click', async () => {
     setMessage(reserveStatusMessage, 'Select a date before completing the reservation.', 'error');
     return;
   }
+
+  const reserveItemCount = reserveCart.length + miscItems.length;
+  const confirmed = await askConfirm(
+    `Complete this reservation of ${reserveItemCount} item${reserveItemCount === 1 ? '' : 's'}? The selected equipment will be marked as reserved.`
+  );
+  if (!confirmed) return;
 
   try {
     const res = await fetch('/api/reserve/complete', {

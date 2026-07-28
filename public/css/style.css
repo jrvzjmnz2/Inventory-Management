@@ -1,22 +1,29 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
 :root {
-  --ink: #1B2430;
-  --ink-soft: #4B5768;
-  --bg: #EDEFF2;
+  --ink: #0F2A3F;
+  --ink-soft: #52708A;
+  --bg: #FBF6EF;
   --surface: #FFFFFF;
-  --line: #D6DAE1;
-  --amber: #E3A008;
-  --amber-dark: #B87D05;
-  --teal: #0F7173;
+  --surface-soft: #F8F1E4;
+  --line: #D5DBE0;
+  --amber: #D9B77A;
+  --amber-dark: #B8934F;
+  --teal: #1D4E6E;
+  --teal-dark: #123C54;
   --danger: #C1443C;
-  --danger-bg: #FBEAE9;
-  --success-bg: #EAF5EE;
-  --warning-bg: #FDF1D6;
+  --danger-bg: #FBEAE5;
+  --success: #1E7A43;
+  --success-bg: #E9F5EE;
+  --warning-bg: #F5EAD3;
 
   --font-display: 'Space Grotesk', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
+
+  --shadow-sm: 0 2px 8px rgba(15, 42, 63, 0.08);
+  --shadow-md: 0 8px 24px rgba(15, 42, 63, 0.1);
+  --shadow-lg: 0 24px 56px rgba(15, 42, 63, 0.22);
 }
 
 * { box-sizing: border-box; }
@@ -38,6 +45,8 @@ h1, h2, h3, h4 {
 button {
   font-family: var(--font-body);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 button:focus-visible,
@@ -45,6 +54,17 @@ input:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--amber-dark);
   outline-offset: 2px;
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 /* ---------- Login page ---------- */
@@ -55,19 +75,20 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   background:
-    repeating-linear-gradient(135deg, rgba(27,36,48,0.03) 0 2px, transparent 2px 14px),
+    radial-gradient(circle at 15% 15%, rgba(217, 183, 122, 0.12) 0, transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(29, 78, 110, 0.08) 0, transparent 50%),
     var(--bg);
 }
 
 .login-card {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 18px;
   border-top: 4px solid var(--amber);
   padding: 2.5rem 2.5rem 2rem;
   width: 100%;
   max-width: 380px;
-  box-shadow: 0 12px 28px rgba(27, 36, 48, 0.08);
+  box-shadow: var(--shadow-lg);
 }
 
 .login-card h1 {
@@ -95,32 +116,41 @@ select:focus-visible {
 #loginForm input,
 #registerForm input {
   width: 100%;
-  padding: 0.6rem 0.7rem;
+  padding: 0.65rem 0.8rem;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 10px;
   font-size: 0.95rem;
   font-family: var(--font-mono);
-  background: var(--bg);
+  background: var(--surface-soft);
   color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#loginForm input:focus,
+#registerForm input:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(217, 183, 122, 0.25);
 }
 
 #loginForm button[type="submit"],
 #registerForm button[type="submit"] {
   width: 100%;
   margin-top: 1.5rem;
-  padding: 0.7rem;
+  padding: 0.75rem;
   background: var(--ink);
   color: #fff;
   border: none;
-  border-radius: 3px;
+  border-radius: 10px;
   font-weight: 600;
   font-size: 0.95rem;
-  transition: background 0.15s ease;
+  box-shadow: var(--shadow-sm);
 }
 
 #loginForm button[type="submit"]:hover,
 #registerForm button[type="submit"]:hover {
   background: var(--amber-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 .link-btn {
@@ -150,16 +180,60 @@ select:focus-visible {
 
 .hidden { display: none !important; }
 
+/* ---------- Registration success popup ---------- */
+
+.success-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 42, 63, 0.45);
+  opacity: 1;
+  transition: opacity 1s ease;
+}
+
+.success-popup.fade-out {
+  opacity: 0;
+}
+
+.success-popup-card {
+  background: var(--surface);
+  border-radius: 16px;
+  border-top: 4px solid var(--teal);
+  padding: 2rem 2.5rem;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+  animation: popIn 0.25s ease;
+}
+
+.success-popup-icon {
+  font-size: 2.2rem;
+  line-height: 1;
+  color: var(--teal);
+  margin-bottom: 0.6rem;
+}
+
+.success-popup-text {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin: 0;
+}
+
 /* ---------- Dashboard shell ---------- */
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--ink);
+  background: linear-gradient(135deg, var(--ink), #123956);
   color: #fff;
   padding: 1rem 1.75rem;
   border-bottom: 4px solid var(--amber);
+  box-shadow: var(--shadow-sm);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -180,21 +254,22 @@ select:focus-visible {
 
 .user-info button {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.4);
+  border: 1px solid rgba(255, 255, 255, 0.4);
   color: #fff;
   padding: 0.4rem 0.8rem;
-  border-radius: 3px;
+  border-radius: 8px;
   font-size: 0.8rem;
 }
 
 .user-info button:hover {
-  background: rgba(255,255,255,0.12);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--amber);
 }
 
 .tabs {
   display: flex;
-  gap: 0.25rem;
-  padding: 0 1.75rem;
+  gap: 0.35rem;
+  padding: 0.5rem 1.75rem 0;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -206,6 +281,7 @@ select:focus-visible {
   background: transparent;
   border: none;
   border-bottom: 3px solid transparent;
+  border-radius: 10px 10px 0 0;
   padding: 0.85rem 1.1rem;
   font-family: var(--font-display);
   font-weight: 600;
@@ -213,7 +289,13 @@ select:focus-visible {
   color: var(--ink-soft);
 }
 
+.tab-btn:hover {
+  background: rgba(217, 183, 122, 0.12);
+  color: var(--ink);
+}
+
 .tab-btn.active {
+  background: rgba(217, 183, 122, 0.18);
   color: var(--ink);
   border-bottom-color: var(--amber);
 }
@@ -236,15 +318,23 @@ main {
   margin-bottom: 0.75rem;
 }
 
-.input-row input[type="text"] {
+.input-row input[type="text"],
+.input-row input[type="date"] {
   flex: 1;
   min-width: 200px;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 10px;
   font-family: var(--font-mono);
   font-size: 0.95rem;
   background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-row input[type="text"]:focus,
+.input-row input[type="date"]:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(217, 183, 122, 0.2);
 }
 
 button.primary-btn,
@@ -255,15 +345,18 @@ button.primary-btn,
   color: #fff;
   border: none;
   padding: 0.6rem 1.1rem;
-  border-radius: 3px;
+  border-radius: 10px;
   font-weight: 600;
   font-size: 0.85rem;
+  box-shadow: var(--shadow-sm);
 }
 
 button.primary-btn:hover,
 #borrowAddBtn:hover,
 #returnAddBtn:hover {
   background: var(--amber-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 /* ---------- Scan icon button ---------- */
@@ -278,11 +371,14 @@ button.primary-btn:hover,
   background: var(--teal);
   color: #fff;
   border: none;
-  border-radius: 3px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
 }
 
 .input-row .scan-btn:hover {
-  background: #0b5b5c;
+  background: var(--teal-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 .input-row .scan-btn svg {
@@ -297,7 +393,8 @@ button.primary-btn:hover,
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: rgba(11, 15, 20, 0.92);
+  background: rgba(15, 42, 63, 0.7);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -308,9 +405,11 @@ button.primary-btn:hover,
   width: 100%;
   max-width: 420px;
   background: var(--surface);
-  border-radius: 6px;
-  padding: 1.25rem;
+  border-radius: 16px;
+  padding: 1.5rem;
   text-align: center;
+  box-shadow: var(--shadow-lg);
+  animation: popIn 0.25s ease;
 }
 
 .scanner-card h3 {
@@ -320,7 +419,7 @@ button.primary-btn:hover,
 .scanner-viewport {
   width: 100%;
   min-height: 260px;
-  border-radius: 4px;
+  border-radius: 12px;
   overflow: hidden;
   background: #000;
 }
@@ -329,7 +428,7 @@ button.primary-btn:hover,
 .scanner-viewport video,
 .scanner-viewport canvas {
   width: 100% !important;
-  border-radius: 4px;
+  border-radius: 12px;
 }
 
 .scanner-hint {
@@ -343,10 +442,26 @@ button.primary-btn:hover,
   margin-top: 0.75rem;
 }
 
+/* ---------- Confirmation modal (reuses .scanner-modal/.scanner-card) ---------- */
+
+.confirm-actions {
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.confirm-actions .secondary-btn,
+.confirm-actions .primary-btn {
+  flex: 1;
+  width: auto;
+  margin-top: 0;
+}
+
 button.primary-btn:disabled {
   background: var(--line);
   color: var(--ink-soft);
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 button.secondary-btn {
@@ -354,13 +469,14 @@ button.secondary-btn {
   color: var(--ink);
   border: 1px solid var(--line);
   padding: 0.6rem 1rem;
-  border-radius: 3px;
+  border-radius: 10px;
   font-weight: 600;
   font-size: 0.85rem;
 }
 
 button.secondary-btn:hover {
-  border-color: var(--ink-soft);
+  border-color: var(--teal);
+  color: var(--teal);
 }
 
 .message {
@@ -376,9 +492,10 @@ button.secondary-btn:hover {
   background: var(--surface);
   border: 1px solid var(--line);
   border-left: 4px solid var(--teal);
-  border-radius: 4px;
+  border-radius: 12px;
   padding: 0.25rem 1.25rem;
   margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .misc-row {
@@ -419,9 +536,9 @@ button.secondary-btn:hover {
 .stepper-btn {
   width: 28px;
   height: 28px;
-  border-radius: 3px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--surface-soft);
   color: var(--ink);
   font-weight: 700;
   font-size: 1rem;
@@ -433,7 +550,8 @@ button.secondary-btn:hover {
 }
 
 .stepper-btn:hover:not(:disabled) {
-  border-color: var(--ink-soft);
+  border-color: var(--teal);
+  color: var(--teal);
 }
 
 .stepper-btn:disabled {
@@ -461,8 +579,9 @@ button.secondary-btn:hover {
   margin-bottom: 1.5rem;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 12px;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .cart-table th {
@@ -472,20 +591,21 @@ button.secondary-btn:hover {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ink-soft);
-  background: var(--bg);
-  padding: 0.6rem 0.8rem;
+  background: var(--surface-soft);
+  padding: 0.7rem 0.8rem;
   border-bottom: 1px solid var(--line);
 }
 
 .cart-table td {
-  padding: 0.6rem 0.8rem;
+  padding: 0.65rem 0.8rem;
   border-bottom: 1px solid var(--line);
   font-size: 0.9rem;
   vertical-align: middle;
 }
 
 .cart-table tbody tr:last-child td { border-bottom: none; }
-.cart-table tbody tr:nth-child(even) { background: #FAFBFC; }
+.cart-table tbody tr:nth-child(even) { background: var(--surface-soft); }
+.cart-table tbody tr:hover { background: rgba(217, 183, 122, 0.08); }
 
 .filter-row th {
   padding: 0.4rem 0.6rem;
@@ -497,10 +617,10 @@ button.secondary-btn:hover {
   width: 100%;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 8px;
   font-family: var(--font-mono);
   font-size: 0.78rem;
-  background: var(--bg);
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
@@ -513,9 +633,9 @@ button.secondary-btn:hover {
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 0.82rem;
-  background: var(--bg);
+  background: var(--surface-soft);
   border: 1px dashed var(--ink-soft);
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 0.15rem 0.5rem;
 }
 
@@ -523,7 +643,7 @@ button.secondary-btn:hover {
   display: inline-block;
   font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.2rem 0.6rem;
+  padding: 0.25rem 0.7rem;
   border-radius: 999px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -531,7 +651,7 @@ button.secondary-btn:hover {
 
 .status-available {
   background: var(--success-bg);
-  color: #1E7A43;
+  color: var(--success);
 }
 
 .status-unavailable {
@@ -571,7 +691,7 @@ button.secondary-btn:hover {
   min-width: 140px;
   padding: 0.4rem 0.55rem;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 8px;
   background: transparent;
   font-family: var(--font-body);
   font-size: 0.88rem;
@@ -585,7 +705,7 @@ button.secondary-btn:hover {
 }
 
 .comment-input:focus {
-  border-color: var(--ink-soft);
+  border-color: var(--teal);
   background: var(--surface);
   outline: none;
 }

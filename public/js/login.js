@@ -48,6 +48,22 @@ document.getElementById('showLogin').addEventListener('click', () => {
   document.getElementById('showRegister').classList.remove('hidden');
 });
 
+// Shows the "Account Created Successfully" popup, holds it on screen briefly,
+// fades it out over 1s (see .success-popup's CSS transition), then runs
+// `onDone` - used to return to the login screen once it's gone.
+const registerSuccessPopup = document.getElementById('registerSuccessPopup');
+
+function showSuccessPopup(onDone) {
+  registerSuccessPopup.classList.remove('hidden', 'fade-out');
+  setTimeout(() => {
+    registerSuccessPopup.classList.add('fade-out');
+  }, 1400);
+  setTimeout(() => {
+    registerSuccessPopup.classList.add('hidden');
+    if (onDone) onDone();
+  }, 2400);
+}
+
 registerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const employeeId = document.getElementById('regId').value.trim();
@@ -71,8 +87,13 @@ registerForm.addEventListener('submit', async (e) => {
       return;
     }
 
-    okEl.textContent = 'Registration successful. You can now log in.';
     registerForm.reset();
+    showSuccessPopup(() => {
+      registerForm.classList.add('hidden');
+      document.getElementById('showLogin').classList.add('hidden');
+      loginForm.classList.remove('hidden');
+      document.getElementById('showRegister').classList.remove('hidden');
+    });
   } catch (err) {
     errEl.textContent = 'Could not reach the server. Is it running?';
   }
