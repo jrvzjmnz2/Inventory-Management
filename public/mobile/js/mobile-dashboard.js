@@ -651,17 +651,25 @@ async function startScanner(inputEl, addHandler) {
   }
 
   activeScanner = new Html5Qrcode('scannerViewport');
+  const scanConfig = { fps: 10, qrbox: { width: 260, height: 160 } }; // draws the scan-box outline
+
   try {
+    // Back camera, with a higher resolution feed so small barcodes are
+    // easier for the decoder to resolve.
     await activeScanner.start(
-      // Back camera, with a higher resolution feed so small barcodes are
-      // easier for the decoder to resolve.
       { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      { fps: 10, qrbox: { width: 260, height: 160 } }, // draws the scan-box outline
+      scanConfig,
       onScanSuccess,
       () => {} // per-frame "nothing found yet" callback - ignore and keep scanning
     );
   } catch (err) {
-    scannerError.textContent = 'Could not access the camera. Check permissions and try again.';
+    console.warn('Camera start failed with a resolution hint, retrying with a plain camera request:', err);
+    try {
+      await activeScanner.start({ facingMode: 'environment' }, scanConfig, onScanSuccess, () => {});
+    } catch (err2) {
+      console.error('Camera start failed:', err2);
+      scannerError.textContent = `Could not access the camera: ${err2.name || 'Error'}${err2.message ? ' - ' + err2.message : ''}`;
+    }
   }
 }
 
