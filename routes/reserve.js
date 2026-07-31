@@ -26,6 +26,13 @@ router.post('/complete', async (req, res) => {
     if (!employeeId) {
       return res.status(400).json({ message: 'You must be logged in to reserve equipment.' });
     }
+    // Normally employeeId is always the logged-in user (guaranteed to
+    // exist). The Admin dashboard can also reserve on behalf of any employee
+    // via a free-text ID field, so that value is checked here too.
+    const employeeExists = await db.collection(COLLECTIONS.EMPLOYEES).findOne({ employeeId });
+    if (!employeeExists) {
+      return res.status(400).json({ message: `No employee with ID "${employeeId}" exists.` });
+    }
     if (equipmentIds.length === 0 && miscItems.length === 0) {
       return res.status(400).json({ message: 'Add at least one item to the cart before completing.' });
     }

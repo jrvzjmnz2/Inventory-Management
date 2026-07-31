@@ -20,4 +20,37 @@ const MISC_ITEMS = [
   'Scissors'
 ];
 
-module.exports = { COLLECTIONS, PURPOSE_OPTIONS, MISC_ITEMS };
+// The employeeId that unlocks the admin-only interface on the web dashboard
+// (full-cell inventory editing, borrowing/reserving on behalf of someone
+// else, and CSV import). It's just a regular registered employee account
+// with this exact ID - no separate role/permission system.
+const ADMIN_EMPLOYEE_ID = 'Admin';
+
+const EQUIPMENT_STATUS_OPTIONS = ['Available', 'Unavailable', 'Reserved'];
+
+// Fields the generic admin "edit any cell" endpoint is allowed to touch.
+// Comment/Additional Information are deliberately excluded here - those stay
+// on their existing, non-admin-gated endpoints so every user (not just
+// Admin) can keep editing them as before.
+const EQUIPMENT_ADMIN_EDITABLE_FIELDS = [
+  'equipmentId',
+  'item',
+  'status',
+  'employeeId',
+  'event',
+  'lastBorrowedBy',
+  'lastBorrowedAt'
+];
+
+// Columns expected in an admin CSV import.
+const CSV_IMPORT_COLUMNS = ['additionalInfo', 'comment', 'employeeId', 'equipmentId', 'item', 'status'];
+
+module.exports = {
+  COLLECTIONS,
+  PURPOSE_OPTIONS,
+  MISC_ITEMS,
+  ADMIN_EMPLOYEE_ID,
+  EQUIPMENT_STATUS_OPTIONS,
+  EQUIPMENT_ADMIN_EDITABLE_FIELDS,
+  CSV_IMPORT_COLUMNS
+};

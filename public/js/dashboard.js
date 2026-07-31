@@ -8,6 +8,18 @@ if (!employeeId) {
 
 document.getElementById('welcomeText').textContent = `${employeeName} (${employeeId})`;
 
+// ---------- Admin mode ----------
+// The "Admin" employeeId unlocks a few extra powers on this page: editing
+// any inventory cell, borrowing/reserving on behalf of another employee,
+// and importing equipment via CSV. It's just a regular registered account
+// with this exact ID - no separate roles/permissions system.
+const ADMIN_EMPLOYEE_ID = 'Admin';
+const isAdmin = employeeId === ADMIN_EMPLOYEE_ID;
+if (isAdmin) {
+  document.getElementById('adminBadge').classList.remove('hidden');
+  document.querySelectorAll('.admin-only').forEach((el) => el.classList.remove('hidden'));
+}
+
 document.getElementById('logoutBtn').addEventListener('click', () => {
   sessionStorage.removeItem('employeeId');
   sessionStorage.removeItem('employeeName');
@@ -91,6 +103,7 @@ const exportBtn = document.getElementById('exportBtn');
 const borrowStatusMessage = document.getElementById('borrowStatusMessage');
 const purposeSelect = document.getElementById('purposeSelect');
 const eventInput = document.getElementById('eventInput');
+const borrowOnBehalfInput = document.getElementById('borrowOnBehalfInput');
 
 // Builds a fixed checklist of miscellaneous items inside `containerEl`: a
 // checkbox plus a +/- quantity stepper per row. The checked rows *are* the
@@ -270,6 +283,19 @@ borrowCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
+  // Admin can borrow on behalf of any employee via the extra ID field that
+  // only appears for the Admin account - everyone else always borrows as
+  // themselves.
+  let actingEmployeeId = employeeId;
+  if (isAdmin) {
+    const onBehalfId = borrowOnBehalfInput.value.trim();
+    if (!onBehalfId) {
+      setMessage(borrowStatusMessage, 'Enter the Employee ID to borrow on behalf of.', 'error');
+      return;
+    }
+    actingEmployeeId = onBehalfId;
+  }
+
   const itemCount = borrowCart.length + miscItems.length;
   const confirmed = await askConfirm(
     `Complete this borrow of ${itemCount} item${itemCount === 1 ? '' : 's'}? The selected equipment will be marked as unavailable.`
@@ -281,7 +307,7 @@ borrowCompleteBtn.addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        employeeId,
+        employeeId: actingEmployeeId,
         purpose: purpose || null,
         event: eventValue || null,
         equipmentIds: borrowCart.map((c) => c.equipmentId),
@@ -309,6 +335,7 @@ borrowCompleteBtn.addEventListener('click', async () => {
     borrowCart = [];
     purposeSelect.value = '';
     eventInput.value = '';
+    if (isAdmin) borrowOnBehalfInput.value = '';
     renderBorrowCart();
     borrowMisc.reset();
     exportBtn.disabled = false;
@@ -482,6 +509,7 @@ const reserveStatusMessage = document.getElementById('reserveStatusMessage');
 const reservePurposeSelect = document.getElementById('reservePurposeSelect');
 const reserveEventInput = document.getElementById('reserveEventInput');
 const reserveDateInput = document.getElementById('reserveDateInput');
+const reserveOnBehalfInput = document.getElementById('reserveOnBehalfInput');
 const reserveMisc = createMiscChecklist(document.getElementById('miscChecklistReserve'));
 
 reserveInput.addEventListener('keydown', (e) => {
@@ -590,6 +618,19 @@ reserveCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
+  // Admin can reserve on behalf of any employee via the extra ID field that
+  // only appears for the Admin account - everyone else always reserves as
+  // themselves.
+  let actingEmployeeId = employeeId;
+  if (isAdmin) {
+    const onBehalfId = reserveOnBehalfInput.value.trim();
+    if (!onBehalfId) {
+      setMessage(reserveStatusMessage, 'Enter the Employee ID to reserve on behalf of.', 'error');
+      return;
+    }
+    actingEmployeeId = onBehalfId;
+  }
+
   const reserveItemCount = reserveCart.length + miscItems.length;
   const confirmed = await askConfirm(
     `Complete this reservation of ${reserveItemCount} item${reserveItemCount === 1 ? '' : 's'}? The selected equipment will be marked as reserved.`
@@ -601,7 +642,7 @@ reserveCompleteBtn.addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        employeeId,
+        employeeId: actingEmployeeId,
         purpose: purpose || null,
         event: eventValue || null,
         date: dateValue || null,
@@ -631,6 +672,7 @@ reserveCompleteBtn.addEventListener('click', async () => {
     reservePurposeSelect.value = '';
     reserveEventInput.value = '';
     reserveDateInput.value = '';
+    if (isAdmin) reserveOnBehalfInput.value = '';
     renderReserveCart();
     reserveMisc.reset();
   } catch (err) {
@@ -664,6 +706,48 @@ document.getElementById('clearFiltersBtn').addEventListener('click', () => {
   inventoryFilters = {};
   applyInventoryFilters();
 });
+
+// ---------- Admin-only: CSV import ----------
+// Adds new equipment or updates existing rows (matched by equipmentId) from
+// a CSV file with additionalInfo, comment, employeeId, equipmentId, item,
+// and status columns.
+const importCsvBtn = document.getElementById('importCsvBtn');
+const importCsvFile = document.getElementById('importCsvFile');
+const importResultMessage = document.getElementById('importResultMessage');
+
+if (importCsvBtn) {
+  importCsvBtn.addEventListener('click', () => importCsvFile.click());
+}
+
+if (importCsvFile) {
+  importCsvFile.addEventListener('change', async () => {
+    const file = importCsvFile.files[0];
+    importCsvFile.value = ''; // reset so selecting the same file again still fires "change"
+    if (!file) return;
+
+    setMessage(importResultMessage, 'Importing…', null);
+
+    try {
+      const csvText = await file.text();
+      const res = await fetch('/api/equipment/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: csvText, requesterId: employeeId })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(importResultMessage, data.message || 'Could not import that CSV file.', 'error');
+        return;
+      }
+
+      setMessage(importResultMessage, data.message, 'success');
+      await loadInventory();
+    } catch (err) {
+      setMessage(importResultMessage, 'Could not reach the server.', 'error');
+    }
+  });
+}
 
 function textMatches(value, filterValue) {
   if (!filterValue) return true;
@@ -734,6 +818,22 @@ function renderInventoryRows(items) {
     return;
   }
 
+  const STATUS_OPTIONS = ['Available', 'Unavailable', 'Reserved'];
+
+  // Plain admin text-field cell: same look as the Comment/Additional Info
+  // inputs, but wired to the admin-only PATCH .../field endpoint instead.
+  function adminField(equipmentId, field, value, placeholder) {
+    return `
+      <input
+        type="text"
+        class="comment-input admin-field"
+        data-equipment-id="${escapeHtml(equipmentId)}"
+        data-field="${field}"
+        value="${escapeHtml(value || '')}"
+        placeholder="${escapeHtml(placeholder || '')}"
+      >`;
+  }
+
   inventoryBody.innerHTML = items
     .map((i) => {
       const pillClass =
@@ -742,11 +842,42 @@ function renderInventoryRows(items) {
       const lastBorrower = i.lastBorrowedBy
         ? `${escapeHtml(i.lastBorrowedByName)} (${escapeHtml(i.lastBorrowedBy)})`
         : '-';
+
+      // Admin gets every cell as an editable control; everyone else keeps
+      // the existing read-only display (Comment/Additional Info stay
+      // editable for all users, unchanged).
+      const equipmentIdCell = isAdmin
+        ? adminField(i.equipmentId, 'equipmentId', i.equipmentId)
+        : `<span class="tag-chip">${escapeHtml(i.equipmentId)}</span>`;
+      const itemCell = isAdmin ? adminField(i.equipmentId, 'item', i.item) : escapeHtml(i.item);
+      const statusCell = isAdmin
+        ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="status">
+            ${STATUS_OPTIONS.map(
+              (opt) => `<option value="${opt}" ${opt === i.status ? 'selected' : ''}>${opt}</option>`
+            ).join('')}
+          </select>`
+        : `<span class="status-pill ${pillClass}">${escapeHtml(i.status)}</span>`;
+      const borrowedByCell = isAdmin
+        ? adminField(i.equipmentId, 'employeeId', i.employeeId, 'Employee ID')
+        : borrower;
+      const eventCell = isAdmin ? adminField(i.equipmentId, 'event', i.event, 'Event') : escapeHtml(i.event) || '-';
+      const lastBorrowedByCell = isAdmin
+        ? adminField(i.equipmentId, 'lastBorrowedBy', i.lastBorrowedBy, 'Employee ID')
+        : lastBorrower;
+      const lastBorrowedAtCell = isAdmin
+        ? adminField(
+            i.equipmentId,
+            'lastBorrowedAt',
+            i.lastBorrowedAt ? new Date(i.lastBorrowedAt).toISOString().slice(0, 10) : '',
+            'YYYY-MM-DD'
+          )
+        : formatDateTime(i.lastBorrowedAt);
+
       return `
       <tr>
-        <td><span class="tag-chip">${escapeHtml(i.equipmentId)}</span></td>
-        <td>${escapeHtml(i.item)}</td>
-        <td><span class="status-pill ${pillClass}">${escapeHtml(i.status)}</span></td>
+        <td>${equipmentIdCell}</td>
+        <td>${itemCell}</td>
+        <td>${statusCell}</td>
         <td>
           <input
             type="text"
@@ -769,15 +900,16 @@ function renderInventoryRows(items) {
             placeholder="Add additional information…"
           >
         </td>
-        <td>${borrower}</td>
-        <td>${escapeHtml(i.event) || '-'}</td>
-        <td>${lastBorrower}</td>
-        <td>${formatDateTime(i.lastBorrowedAt)}</td>
+        <td>${borrowedByCell}</td>
+        <td>${eventCell}</td>
+        <td>${lastBorrowedByCell}</td>
+        <td>${lastBorrowedAtCell}</td>
       </tr>`;
     })
     .join('');
 
-  inventoryBody.querySelectorAll('.comment-input').forEach((input) => {
+  // Comment/Additional Information: unchanged, open to every user.
+  inventoryBody.querySelectorAll('.comment-input[data-endpoint]').forEach((input) => {
     input.dataset.original = input.value;
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -787,6 +919,63 @@ function renderInventoryRows(items) {
     });
     input.addEventListener('blur', () => saveEditableField(input));
   });
+
+  // Every other cell: Admin-only, hits the generic field-edit endpoint.
+  if (isAdmin) {
+    inventoryBody.querySelectorAll('.admin-field').forEach((input) => {
+      input.dataset.original = input.value;
+      if (input.tagName === 'SELECT') {
+        input.addEventListener('change', () => saveAdminField(input));
+      } else {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+          }
+        });
+        input.addEventListener('blur', () => saveAdminField(input));
+      }
+    });
+  }
+}
+
+// Admin-only counterpart to saveEditableField() above - saves any inventory
+// cell via PATCH /api/equipment/:id/field, then reloads the whole table
+// since editing a field like equipmentId or status can change how other
+// rows/cells should display (borrower names, tag chips, etc.).
+async function saveAdminField(input) {
+  const newValue = input.value.trim();
+  if (newValue === input.dataset.original) return;
+
+  const equipmentId = input.dataset.equipmentId;
+  const field = input.dataset.field;
+  input.disabled = true;
+  setMessage(inventoryMessage, '', null);
+
+  try {
+    const res = await fetch(`/api/equipment/${encodeURIComponent(equipmentId)}/field`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field, value: newValue, requesterId: employeeId })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      input.value = input.dataset.original;
+      input.disabled = false;
+      flashCommentInput(input, false);
+      setMessage(inventoryMessage, data.message || `Could not save changes for ${equipmentId}.`, 'error');
+      return;
+    }
+
+    setMessage(inventoryMessage, 'Saved.', 'success');
+    await loadInventory();
+  } catch (err) {
+    input.value = input.dataset.original;
+    input.disabled = false;
+    flashCommentInput(input, false);
+    setMessage(inventoryMessage, 'Could not reach the server.', 'error');
+  }
 }
 
 function flashCommentInput(input, success) {

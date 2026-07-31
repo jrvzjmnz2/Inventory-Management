@@ -10,6 +10,7 @@
   <header class="topbar">
     <h1>Equipment Inventory</h1>
     <div class="user-info">
+      <span id="adminBadge" class="admin-badge hidden">ADMIN</span>
       <span id="welcomeText"></span>
       <button id="logoutBtn" type="button">Log Out</button>
     </div>
@@ -35,6 +36,10 @@
         </button>
       </div>
       <p id="borrowMessage" class="message"></p>
+
+      <div id="borrowAdminRow" class="input-row admin-only hidden">
+        <input type="text" id="borrowOnBehalfInput" placeholder="Employee ID to borrow on behalf of (Admin only)">
+      </div>
 
       <h3>Equipment Cart</h3>
       <table class="cart-table">
@@ -112,6 +117,10 @@
       </div>
       <p id="reserveMessage" class="message"></p>
 
+      <div id="reserveAdminRow" class="input-row admin-only hidden">
+        <input type="text" id="reserveOnBehalfInput" placeholder="Employee ID to reserve on behalf of (Admin only)">
+      </div>
+
       <h3>Equipment Cart</h3>
       <table class="cart-table">
         <thead>
@@ -156,8 +165,11 @@
       <div class="action-row">
         <button id="refreshInventoryBtn" type="button" class="secondary-btn">Refresh</button>
         <button id="clearFiltersBtn" type="button" class="secondary-btn">Clear Filters</button>
+        <button id="importCsvBtn" type="button" class="secondary-btn admin-only hidden">Import CSV</button>
+        <input type="file" id="importCsvFile" accept=".csv" class="hidden">
       </div>
       <p id="inventoryMessage" class="message"></p>
+      <p id="importResultMessage" class="message admin-only hidden"></p>
       <table class="cart-table">
         <thead>
           <tr>
