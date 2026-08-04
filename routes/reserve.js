@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../db');
 const { COLLECTIONS, PURPOSE_OPTIONS, MISC_ITEMS } = require('../constants');
+const { canonicalStatus } = require('../utils/status');
 
 const router = express.Router();
 
@@ -53,7 +54,7 @@ router.post('/complete', async (req, res) => {
       const eq = await equipment.findOne({ equipmentId });
       if (!eq) {
         conflicts.push({ equipmentId, reason: 'not_found' });
-      } else if (eq.status !== 'Available') {
+      } else if (canonicalStatus(eq.status) !== 'Available') {
         conflicts.push({ equipmentId, reason: 'unavailable', borrowerId: eq.employeeId });
       }
     }

@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../db');
 const { COLLECTIONS } = require('../constants');
+const { canonicalStatus } = require('../utils/status');
 
 const router = express.Router();
 
@@ -27,9 +28,9 @@ router.post('/complete', async (req, res) => {
       const eq = await equipment.findOne({ equipmentId });
       if (!eq) {
         invalid.push({ equipmentId, reason: 'not_found' });
-      } else if (eq.status === 'Reserved') {
+      } else if (canonicalStatus(eq.status) === 'Reserved') {
         reservedIds.push(equipmentId);
-      } else if (eq.status === 'Unavailable') {
+      } else if (canonicalStatus(eq.status) === 'Unavailable') {
         borrowedIds.push(equipmentId);
       } else {
         invalid.push({ equipmentId, reason: 'already_available' });

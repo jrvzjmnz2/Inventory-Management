@@ -42,6 +42,18 @@ function setMessage(el, text, type) {
   if (type) el.classList.add(type);
 }
 
+// Some existing inventory rows have their status stored in uppercase
+// (AVAILABLE/UNAVAILABLE/RESERVED) from before this app's own borrow/
+// return/reserve actions settled on proper case (Available/Unavailable/
+// Reserved). This maps either casing (or anything else) to the canonical
+// proper-case label, so color-coding and display are consistent no matter
+// how a given row's status was originally written.
+const CANONICAL_STATUSES = ['Available', 'Unavailable', 'Reserved'];
+function normalizeStatusLabel(status) {
+  const match = CANONICAL_STATUSES.find((s) => s.toUpperCase() === String(status || '').toUpperCase());
+  return match || status || '';
+}
+
 // ---------- Shared confirmation modal ----------
 // Used by the Complete button on every tab so nothing gets finalized
 // without an explicit "yes". Returns a Promise<boolean> - true if the user
@@ -215,7 +227,7 @@ async function handleBorrowAdd() {
       return;
     }
 
-    if (data.status !== 'Available') {
+    if (normalizeStatusLabel(data.status) !== 'Available') {
       const borrower = data.employeeName
         ? `${data.employeeName} (${data.employeeId})`
         : data.employeeId || 'another employee';
@@ -410,7 +422,8 @@ async function handleReturnAdd() {
       return;
     }
 
-    if (data.status !== 'Unavailable' && data.status !== 'Reserved') {
+    const returnStatusLabel = normalizeStatusLabel(data.status);
+    if (returnStatusLabel !== 'Unavailable' && returnStatusLabel !== 'Reserved') {
       setMessage(returnMessage, `"${data.item}" (${data.equipmentId}) is not currently borrowed or reserved.`, 'error');
       return;
     }
@@ -542,9 +555,10 @@ async function handleReserveAdd() {
       return;
     }
 
-    if (data.status !== 'Available') {
+    const reserveStatusLabel = normalizeStatusLabel(data.status);
+    if (reserveStatusLabel !== 'Available') {
       let reason;
-      if (data.status === 'Reserved') {
+      if (reserveStatusLabel === 'Reserved') {
         reason = `is already reserved${data.event ? ` for "${data.event}"` : ''}${data.comment ? ` (needed ${data.comment})` : ''}`;
       } else {
         const borrower = data.employeeName
@@ -793,7 +807,11 @@ function applyInventoryFilters() {
     return (
       textMatches(i.equipmentId, inventoryFilters.equipmentId) &&
       textMatches(i.item, inventoryFilters.item) &&
-      (!inventoryFilters.status || i.status === inventoryFilters.status) &&
+      // Case-insensitive: some existing inventory rows have status stored
+      // in uppercase (AVAILABLE/UNAVAILABLE/RESERVED) while the app's own
+      // borrow/return/reserve actions write proper case (Available/...) -
+      // both need to match the same filter selection.
+      (!inventoryFilters.status || String(i.status || '').toLowerCase() === inventoryFilters.status) &&
       textMatches(i.comment, inventoryFilters.comment) &&
       textMatches(i.additionalInfo, inventoryFilters.additionalInfo) &&
       textMatches(borrowerText, inventoryFilters.borrower) &&
@@ -836,8 +854,9 @@ function renderInventoryRows(items) {
 
   inventoryBody.innerHTML = items
     .map((i) => {
+      const statusLabel = normalizeStatusLabel(i.status);
       const pillClass =
-        i.status === 'Available' ? 'status-available' : i.status === 'Reserved' ? 'status-reserved' : 'status-unavailable';
+        statusLabel === 'Available' ? 'status-available' : statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
       const borrower = i.employeeId ? `${escapeHtml(i.employeeName)} (${escapeHtml(i.employeeId)})` : '-';
       const lastBorrower = i.lastBorrowedBy
         ? `${escapeHtml(i.lastBorrowedByName)} (${escapeHtml(i.lastBorrowedBy)})`
@@ -853,10 +872,10 @@ function renderInventoryRows(items) {
       const statusCell = isAdmin
         ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="status">
             ${STATUS_OPTIONS.map(
-              (opt) => `<option value="${opt}" ${opt === i.status ? 'selected' : ''}>${opt}</option>`
+              (opt) => `<option value="${opt}" ${opt === statusLabel ? 'selected' : ''}>${opt}</option>`
             ).join('')}
           </select>`
-        : `<span class="status-pill ${pillClass}">${escapeHtml(i.status)}</span>`;
+        : `<span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>`;
       const borrowedByCell = isAdmin
         ? adminField(i.equipmentId, 'employeeId', i.employeeId, 'Employee ID')
         : borrower;

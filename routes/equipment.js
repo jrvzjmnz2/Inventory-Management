@@ -9,6 +9,7 @@ const {
   CSV_IMPORT_COLUMNS
 } = require('../constants');
 const { parseCsv } = require('../utils/csv');
+const { canonicalStatus } = require('../utils/status');
 
 const router = express.Router();
 
@@ -52,7 +53,10 @@ router.get('/', async (req, res) => {
     const enriched = items.map((i) => ({
       equipmentId: i.equipmentId,
       item: i.item,
-      status: i.status,
+      // Canonicalize to proper case (Available/Unavailable/Reserved) here,
+      // at the source - some existing rows still have status stored in
+      // uppercase from before this app's own writes settled on proper case.
+      status: canonicalStatus(i.status) || i.status,
       comment: i.comment || '',
       additionalInfo: i.additionalInfo || '',
       employeeId: i.employeeId || null,
@@ -96,7 +100,7 @@ router.get('/:id', async (req, res) => {
     res.json({
       equipmentId: item.equipmentId,
       item: item.item,
-      status: item.status,
+      status: canonicalStatus(item.status) || item.status,
       comment: item.comment || '',
       additionalInfo: item.additionalInfo || '',
       employeeId: item.employeeId || null,
@@ -213,10 +217,11 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
         break;
       }
       case 'status': {
-        if (!EQUIPMENT_STATUS_OPTIONS.includes(raw)) {
+        const canonical = canonicalStatus(raw);
+        if (!canonical) {
           return res.status(400).json({ message: `Status must be one of: ${EQUIPMENT_STATUS_OPTIONS.join(', ')}.` });
         }
-        toStore = raw;
+        toStore = canonical;
         break;
       }
       case 'employeeId':
@@ -330,10 +335,10 @@ router.post('/import', requireAdmin, async (req, res) => {
         continue;
       }
 
-      let status = (row.status || '').trim();
-      if (!EQUIPMENT_STATUS_OPTIONS.includes(status)) {
-        status = 'Available';
-      }
+      // Accept any casing (AVAILABLE, available, Available, ...) and store
+      // the canonical proper-case value; only truly unrecognized values
+      // fall back to Available.
+      const status = canonicalStatus(row.status) || 'Available';
 
       await equipment.insertOne({
         equipmentId,
