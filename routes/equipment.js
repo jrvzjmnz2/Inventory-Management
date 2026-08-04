@@ -267,8 +267,10 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
 
 // POST /api/equipment/import - Admin-only CSV import. Body: { csv, requesterId }
 // Expects a header row containing (in any order): additionalInfo, comment,
-// employeeId, equipmentId, item, status. Upserts by equipmentId - existing
-// rows are updated, unrecognized equipmentIds are inserted as new equipment.
+// employeeId, equipmentId, item, status. Only inserts equipmentIds that
+// aren't already in the inventory - any equipmentId that already exists is
+// skipped (left untouched) rather than updated, so a re-imported or
+// overlapping CSV can never overwrite current inventory data.
 router.post('/import', requireAdmin, async (req, res) => {
   try {
     const { csv } = req.body;
@@ -299,8 +301,10 @@ router.post('/import', requireAdmin, async (req, res) => {
     const equipment = db.collection(COLLECTIONS.EQUIPMENT);
 
     let inserted = 0;
-    let updated = 0;
     const skipped = [];
+    // Tracks equipmentIds this import has already inserted, so a duplicate
+    // row later in the same file is also skipped rather than inserted twice.
+    const seenInThisImport = new Set();
 
     for (let i = 0; i < rows.length; i++) {
       const rowNum = i + 2; // +1 for header row, +1 for 1-indexing
@@ -313,40 +317,43 @@ router.post('/import', requireAdmin, async (req, res) => {
         continue;
       }
 
+      // Only brand-new equipment gets imported - anything already in the
+      // inventory (or already inserted earlier in this same CSV) is left
+      // untouched rather than updated.
+      if (seenInThisImport.has(equipmentId)) {
+        skipped.push({ row: rowNum, equipmentId, reason: 'Duplicate equipmentId within this CSV.' });
+        continue;
+      }
+      const existing = await equipment.findOne({ equipmentId });
+      if (existing) {
+        skipped.push({ row: rowNum, equipmentId, reason: 'Equipment ID already exists in inventory.' });
+        continue;
+      }
+
       let status = (row.status || '').trim();
       if (!EQUIPMENT_STATUS_OPTIONS.includes(status)) {
         status = 'Available';
       }
 
-      const doc = {
+      await equipment.insertOne({
         equipmentId,
         item,
         status,
         comment: (row.comment || '').trim(),
         additionalInfo: (row.additionalInfo || '').trim(),
-        employeeId: (row.employeeId || '').trim() || null
-      };
-
-      const existing = await equipment.findOne({ equipmentId });
-      if (existing) {
-        await equipment.updateOne({ equipmentId }, { $set: doc });
-        updated++;
-      } else {
-        await equipment.insertOne({
-          ...doc,
-          purpose: null,
-          event: null,
-          lastBorrowedBy: null,
-          lastBorrowedAt: null
-        });
-        inserted++;
-      }
+        employeeId: (row.employeeId || '').trim() || null,
+        purpose: null,
+        event: null,
+        lastBorrowedBy: null,
+        lastBorrowedAt: null
+      });
+      seenInThisImport.add(equipmentId);
+      inserted++;
     }
 
     res.json({
-      message: `Import complete: ${inserted} added, ${updated} updated${skipped.length ? `, ${skipped.length} skipped` : ''}.`,
+      message: `Import complete: ${inserted} added${skipped.length ? `, ${skipped.length} skipped (already in inventory or invalid)` : ''}.`,
       inserted,
-      updated,
       skipped
     });
   } catch (err) {
