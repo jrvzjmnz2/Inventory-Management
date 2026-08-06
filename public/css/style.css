@@ -907,6 +907,19 @@ button.event-list-btn:hover {
   border-bottom: 1px solid var(--line);
 }
 
+/* My Items: inline "Change Reservation Date" form, toggled open under an
+   event's header row - see the event-reschedule-* classes in dashboard.js */
+.event-reschedule-row td {
+  background: var(--surface-soft);
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-reschedule-row .input-row {
+  margin: 0;
+  flex-wrap: wrap;
+}
+
 /* My Items: barcode-verified return (camera scan button + physical-scanner
    text input), replacing a one-click Return button */
 .home-return-scan-group {

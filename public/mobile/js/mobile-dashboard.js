@@ -276,19 +276,111 @@ function renderMyItems(items) {
 
   const groups = groupItemsByEvent(items);
   homeBody.innerHTML = groups
-    .map(
-      ([eventName, groupItems]) =>
-        `<tr class="event-section-header">
+    .map(([eventName, groupItems]) => {
+      // Pending (not-yet-started) items don't count towards either of
+      // these - there's nothing to borrow or reschedule on them yet, just
+      // the Cancel option already offered on their own row.
+      const activeItems = groupItems.filter((i) => !i.isPending);
+      const reservedItems = activeItems.filter((i) => normalizeStatusLabel(i.status) === 'Reserved');
+      const hasReservedToBorrow = reservedItems.length > 0;
+      // "All reserved" = every active item in this event is still sitting
+      // on the shelf, on-hold but never picked up - none checked out yet.
+      const allReserved = activeItems.length > 0 && reservedItems.length === activeItems.length;
+      const reservedIdsAttr = reservedItems.map((i) => i.equipmentId).join(',');
+      // Prefills the reschedule form with the earliest current end among
+      // the group, so "changing" the date starts from something real.
+      const currentEnd = reservedItems.length
+        ? reservedItems.reduce(
+            (min, i) => (new Date(i.reservedUntil).getTime() < new Date(min).getTime() ? i.reservedUntil : min),
+            reservedItems[0].reservedUntil
+          )
+        : null;
+      // Anything with a reservation left to cancel/end: still pending
+      // (not started), sitting Reserved on the shelf, or checked out but
+      // still under an active hold - matches exactly what gets an
+      // individual Cancel/End Reservation button on its own row below.
+      const cancellableItems = groupItems.filter((i) => {
+        if (i.isPending) return true;
+        const statusLabel = normalizeStatusLabel(i.status);
+        if (statusLabel === 'Reserved') return true;
+        if (statusLabel === 'Unavailable') {
+          return Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
+        }
+        return false;
+      });
+      const hasCancellable = cancellableItems.length > 0;
+      const cancellableIdsAttr = cancellableItems.map((i) => i.equipmentId).join(',');
+
+      return `<tr class="event-section-header">
           <td colspan="4">${escapeHtml(eventName)}</td>
           <td class="action-row">
+            ${
+              hasReservedToBorrow
+                ? `<button class="secondary-btn event-borrow-all-btn" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(reservedIdsAttr)}" type="button">Borrow All</button>`
+                : ''
+            }
+            ${
+              allReserved
+                ? `<button class="secondary-btn event-reschedule-btn" data-event="${escapeHtml(eventName)}" type="button">Change Reservation Date</button>`
+                : ''
+            }
+            ${
+              hasCancellable
+                ? `<button class="remove-btn event-cancel-all-btn" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(cancellableIdsAttr)}" type="button">Remove All Reservations</button>`
+                : ''
+            }
             <button class="secondary-btn event-list-btn" data-event="${escapeHtml(eventName)}" type="button">Create Equipment List</button>
           </td>
-        </tr>${groupItems.map(renderMyItemRow).join('')}`
-    )
+        </tr>${
+          allReserved
+            ? `<tr class="event-reschedule-row hidden" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(reservedIdsAttr)}">
+                <td colspan="5">
+                  <div class="input-row">
+                    <input type="date" class="event-reschedule-end-date" value="${currentEnd ? toLocalDateInputValue(currentEnd) : ''}">
+                    <input type="time" class="event-reschedule-end-time" value="${currentEnd ? toLocalTimeInputValue(currentEnd) : ''}">
+                    <button class="secondary-btn event-reschedule-save-btn" type="button">Save New Date</button>
+                    <button class="remove-btn event-reschedule-cancel-btn" type="button">Cancel</button>
+                  </div>
+                </td>
+              </tr>`
+            : ''
+        }${groupItems.map(renderMyItemRow).join('')}`;
+    })
     .join('');
 
   homeBody.querySelectorAll('.event-list-btn').forEach((btn) => {
     btn.addEventListener('click', () => createEventEquipmentList(btn.dataset.event));
+  });
+  homeBody.querySelectorAll('.event-borrow-all-btn').forEach((btn) => {
+    const ids = btn.dataset.equipmentIds ? btn.dataset.equipmentIds.split(',').filter(Boolean) : [];
+    btn.addEventListener('click', () => homeBorrowAll(btn.dataset.event, ids));
+  });
+  homeBody.querySelectorAll('.event-cancel-all-btn').forEach((btn) => {
+    const ids = btn.dataset.equipmentIds ? btn.dataset.equipmentIds.split(',').filter(Boolean) : [];
+    btn.addEventListener('click', () => homeCancelAll(btn.dataset.event, ids));
+  });
+  homeBody.querySelectorAll('.event-reschedule-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      // The reschedule row is always the very next sibling of this header
+      // row (see the template above), so this doesn't need any selector
+      // that could break on an event name with unusual characters.
+      const row = btn.closest('tr').nextElementSibling;
+      if (row && row.classList.contains('event-reschedule-row')) {
+        row.classList.toggle('hidden');
+      }
+    });
+  });
+  homeBody.querySelectorAll('.event-reschedule-cancel-btn').forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('tr').classList.add('hidden'));
+  });
+  homeBody.querySelectorAll('.event-reschedule-save-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('tr');
+      const ids = row.dataset.equipmentIds ? row.dataset.equipmentIds.split(',').filter(Boolean) : [];
+      const dateValue = row.querySelector('.event-reschedule-end-date').value;
+      const timeValue = row.querySelector('.event-reschedule-end-time').value;
+      homeReschedule(row.dataset.event, ids, dateValue, timeValue);
+    });
   });
   homeBody.querySelectorAll('.home-borrow-btn').forEach((btn) => {
     btn.addEventListener('click', () => homeBorrowNow(btn.dataset.equipmentId, btn.dataset.item));
@@ -432,6 +524,121 @@ async function homeCancelReservation(equipmentId, itemLabel) {
       return;
     }
     setMessage(homeMessage, `Reservation on "${label}" cancelled.`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+// Bulk version of homeCancelReservation above - one /api/reserve/cancel call
+// for every item under one event that still has a reservation to cancel/end
+// (pending, on-the-shelf Reserved, or checked-out with an active hold),
+// rather than tapping Cancel/End on each row individually. /api/reserve/cancel
+// already buckets each equipmentId by its own current state (drop pending /
+// release to Available / just clear the hold), so this works the same for a
+// mixed set as it does one at a time.
+async function homeCancelAll(eventName, equipmentIds) {
+  if (equipmentIds.length === 0) return;
+  setMessage(homeMessage, '', null);
+  try {
+    const res = await fetch(apiUrl('/api/reserve/cancel'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeId, equipmentIds })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not cancel those reservations.', 'error');
+      return;
+    }
+    setMessage(homeMessage, `Reservations cancelled for "${eventName}".`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+// Bulk version of homeBorrowNow above - one /api/borrow/complete call for
+// every still-Reserved item under one event, rather than tapping "Borrow
+// Now" on each row individually. Only shown (see renderMyItems) once
+// there's at least one such item in the group.
+async function homeBorrowAll(eventName, equipmentIds) {
+  if (equipmentIds.length === 0) return;
+  setMessage(homeMessage, '', null);
+  try {
+    // These items were all reserved together under this same event, so they
+    // share the same purpose/event - look up the first one for those
+    // values, same as the single-item Borrow Now flow above.
+    const lookup = await fetch(apiUrl(`/api/equipment/${encodeURIComponent(equipmentIds[0])}`));
+    const eq = await lookup.json();
+    if (!lookup.ok) {
+      setMessage(homeMessage, eq.message || 'Could not look up that item.', 'error');
+      return;
+    }
+
+    const res = await fetch(apiUrl('/api/borrow/complete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeId,
+        purpose: eq.purpose,
+        event: eq.event,
+        equipmentIds,
+        miscItems: []
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not borrow those items.', 'error');
+      return;
+    }
+    setMessage(
+      homeMessage,
+      `Borrowed ${equipmentIds.length} item${equipmentIds.length === 1 ? '' : 's'} for "${eventName}".`,
+      'success'
+    );
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+// Changes the reservation end date/time for every still-Reserved item under
+// one event at once - see renderMyItems for when this is offered (only once
+// every item in the group is still on the shelf, never picked up) and
+// routes/reserve.js's /reschedule for why only the end (not start) is
+// adjustable here.
+async function homeReschedule(eventName, equipmentIds, dateValue, timeValue) {
+  setMessage(homeMessage, '', null);
+  if (!dateValue || !timeValue) {
+    setMessage(homeMessage, 'Choose a new reservation end date and time.', 'error');
+    return;
+  }
+  // Built here in the browser (see the Reserve tab's own start/end handling)
+  // so the picked time means what it looks like in this employee's own
+  // local time, then sent as an unambiguous ISO instant.
+  const newEnd = new Date(`${dateValue}T${timeValue}`);
+  if (Number.isNaN(newEnd.getTime())) {
+    setMessage(homeMessage, 'Enter a valid end date/time.', 'error');
+    return;
+  }
+  if (newEnd.getTime() <= Date.now()) {
+    setMessage(homeMessage, 'Choose an end date/time in the future.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(apiUrl('/api/reserve/reschedule'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeId, equipmentIds, end: newEnd.toISOString() })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not update the reservation date.', 'error');
+      return;
+    }
+    setMessage(homeMessage, `Reservation date updated for "${eventName}".`, 'success');
     loadMyItems();
   } catch (err) {
     setMessage(homeMessage, 'Could not reach the server.', 'error');
@@ -984,6 +1191,17 @@ reserveCompleteBtn.addEventListener('click', async () => {
     setMessage(reserveStatusMessage, 'Select a start and end date/time before completing the reservation.', 'error');
     return;
   }
+  // Built here in the browser so "09:00" means 9 AM in *this employee's*
+  // local time, then converted to an unambiguous ISO instant (toISOString())
+  // before it ever leaves the client - the server just parses that instant
+  // directly (see routes/reserve.js), so the reservation always lands on
+  // the wall-clock time actually picked, regardless of what timezone the
+  // server itself runs in. Sending raw date/time strings for the server to
+  // reconstruct used to shift the stored time by the server/browser
+  // timezone offset, which is why the My Items display could disagree with
+  // what was selected here.
+  let reservationStartISO = null;
+  let reservationEndISO = null;
   if (reserveCart.length > 0) {
     const startCheck = new Date(`${startDateValue}T${startTimeValue}`);
     const endCheck = new Date(`${endDateValue}T${endTimeValue}`);
@@ -991,6 +1209,8 @@ reserveCompleteBtn.addEventListener('click', async () => {
       setMessage(reserveStatusMessage, 'The end date/time must be after the start date/time.', 'error');
       return;
     }
+    reservationStartISO = startCheck.toISOString();
+    reservationEndISO = endCheck.toISOString();
   }
 
   try {
@@ -1001,10 +1221,8 @@ reserveCompleteBtn.addEventListener('click', async () => {
         employeeId,
         purpose: purpose || null,
         event: eventValue || null,
-        startDate: startDateValue || null,
-        startTime: startTimeValue || null,
-        endDate: endDateValue || null,
-        endTime: endTimeValue || null,
+        start: reservationStartISO,
+        end: reservationEndISO,
         equipmentIds: reserveCart.map((c) => c.equipmentId),
         miscItems
       })
@@ -1275,6 +1493,24 @@ function formatDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleString();
+}
+
+// Formats a Date into the value strings <input type="date">/<input
+// type="time"> expect, in the browser's own local time (not UTC) - used to
+// pre-fill the "Change Reservation Date" fields with the reservation's
+// current end.
+function toLocalDateInputValue(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toLocalTimeInputValue(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 async function loadInventory() {

@@ -40,22 +40,8 @@ router.post('/complete', async (req, res) => {
     const equipment = db.collection(COLLECTIONS.EQUIPMENT);
     const miscLogs = db.collection(COLLECTIONS.MISC_LOGS);
 
-    const {
-      employeeId,
-      purpose,
-      event,
-      startDate,
-      startTime,
-      endDate,
-      endTime,
-      equipmentIds = [],
-      miscItems = []
-    } = req.body;
+    const { employeeId, purpose, event, start, end, equipmentIds = [], miscItems = [] } = req.body;
     const trimmedEvent = typeof event === 'string' ? event.trim() : '';
-    const trimmedStartDate = typeof startDate === 'string' ? startDate.trim() : '';
-    const trimmedStartTime = typeof startTime === 'string' ? startTime.trim() : '';
-    const trimmedEndDate = typeof endDate === 'string' ? endDate.trim() : '';
-    const trimmedEndTime = typeof endTime === 'string' ? endTime.trim() : '';
 
     if (!employeeId) {
       return res.status(400).json({ message: 'You must be logged in to reserve equipment.' });
@@ -76,7 +62,7 @@ router.post('/complete', async (req, res) => {
     if (equipmentIds.length > 0 && !trimmedEvent) {
       return res.status(400).json({ message: 'Enter an Event before completing the reservation.' });
     }
-    if (equipmentIds.length > 0 && (!trimmedStartDate || !trimmedStartTime || !trimmedEndDate || !trimmedEndTime)) {
+    if (equipmentIds.length > 0 && (!start || !end)) {
       return res.status(400).json({ message: 'Select a start and end date/time before completing the reservation.' });
     }
 
@@ -84,8 +70,16 @@ router.post('/complete', async (req, res) => {
     let reservationEnd = null;
     let activateNow = false;
     if (equipmentIds.length > 0) {
-      reservationStart = new Date(`${trimmedStartDate}T${trimmedStartTime}`);
-      reservationEnd = new Date(`${trimmedEndDate}T${trimmedEndTime}`);
+      // start/end are full ISO instant strings (e.g. "2026-08-10T01:00:00.000Z"),
+      // built client-side via Date.prototype.toISOString() from whatever the
+      // employee actually picked in their own browser's local time - so this
+      // parse is unambiguous no matter what timezone this server happens to
+      // run in. (Previously this reconstructed the date from separate
+      // date/time strings server-side, which new Date() parses as *this
+      // server's* local timezone rather than the employee's - if they
+      // differed, the stored/displayed time would be shifted by that offset.)
+      reservationStart = new Date(start);
+      reservationEnd = new Date(end);
       if (Number.isNaN(reservationStart.getTime()) || Number.isNaN(reservationEnd.getTime())) {
         return res.status(400).json({ message: 'Enter a valid start and end date/time.' });
       }
@@ -264,6 +258,68 @@ router.post('/cancel', async (req, res) => {
     res.json({ message: 'Reservation cancelled successfully.' });
   } catch (err) {
     res.status(500).json({ message: 'Server error while cancelling the reservation.', error: err.message });
+  }
+});
+
+// POST /api/reserve/reschedule
+// Body: { employeeId, equipmentIds: string[], end }
+//
+// Lets the reserving employee (or Admin acting on their behalf) change how
+// long an already-active reservation holds for - used by My Items' "Change
+// Reservation Date" bulk action, which only appears once every item under
+// one event is still sitting on the shelf (status Reserved, never picked
+// up). Only the end date/time can move: once a hold is active its start has
+// already happened and isn't stored anywhere separately (only reservedUntil
+// is), so there's nothing else left to reschedule.
+router.post('/reschedule', async (req, res) => {
+  try {
+    const db = getDb();
+    const equipment = db.collection(COLLECTIONS.EQUIPMENT);
+    const { employeeId, equipmentIds = [], end } = req.body;
+
+    if (!employeeId) {
+      return res.status(400).json({ message: 'You must be logged in to change a reservation.' });
+    }
+    if (equipmentIds.length === 0) {
+      return res.status(400).json({ message: 'Select at least one item to reschedule.' });
+    }
+    if (!end) {
+      return res.status(400).json({ message: 'Choose a new reservation end date/time.' });
+    }
+    // end is a full ISO instant built client-side (same approach as
+    // /complete above) so this parse is unambiguous regardless of what
+    // timezone this server happens to run in.
+    const newEnd = new Date(end);
+    if (Number.isNaN(newEnd.getTime())) {
+      return res.status(400).json({ message: 'Enter a valid end date/time.' });
+    }
+    if (newEnd.getTime() <= Date.now()) {
+      return res.status(400).json({ message: 'Choose an end date/time in the future.' });
+    }
+
+    const invalid = [];
+    for (const equipmentId of equipmentIds) {
+      const eq = await equipment.findOne({ equipmentId });
+      if (!eq) {
+        invalid.push({ equipmentId, reason: 'not_found' });
+      } else if (eq.employeeId !== employeeId) {
+        invalid.push({ equipmentId, reason: 'not_yours' });
+      } else if (canonicalStatus(eq.status) !== 'Reserved' || !isReservationActive(eq)) {
+        invalid.push({ equipmentId, reason: 'no_active_reservation' });
+      }
+    }
+    if (invalid.length > 0) {
+      return res.status(409).json({
+        message: 'Some items could not be rescheduled - they may already be borrowed or no longer reserved. Refresh and try again.',
+        invalid
+      });
+    }
+
+    await equipment.updateMany({ equipmentId: { $in: equipmentIds } }, { $set: { reservedUntil: newEnd } });
+
+    res.json({ message: 'Reservation date updated successfully.' });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error while updating the reservation date.', error: err.message });
   }
 });
 
