@@ -584,7 +584,11 @@ async function handleBorrowAdd(overrideId) {
     }
 
     borrowCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
-    borrowInput.value = '';
+    // Only clear the box for manual typing/camera-scan (no overrideId) - a
+    // suggestion-dropdown pick passes its equipmentId as overrideId and
+    // deliberately leaves the typed search text alone so more items can be
+    // picked from the same results without retyping.
+    if (typeof overrideId !== 'string') borrowInput.value = '';
     setMessage(borrowMessage, `Added "${data.item}" to cart.`, 'success');
     renderBorrowCart();
   } catch (err) {
@@ -914,7 +918,11 @@ async function handleReserveAdd(overrideId) {
     }
 
     reserveCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
-    reserveInput.value = '';
+    // Only clear the box for manual typing/camera-scan (no overrideId) - a
+    // suggestion-dropdown pick passes its equipmentId as overrideId and
+    // deliberately leaves the typed search text alone so more items can be
+    // picked from the same results without retyping.
+    if (typeof overrideId !== 'string') reserveInput.value = '';
     setMessage(reserveMessage, `Added "${data.item}" to cart.`, 'success');
     renderReserveCart();
   } catch (err) {
@@ -1085,6 +1093,11 @@ function suggestAvailability(it) {
 function setupSuggestDropdown(inputEl, listEl, { getCandidates, getAvailability, onPick, onEnterFallback }) {
   let items = [];
   let activeIdx = -1;
+  // Equipment IDs currently mid-add (onPick called, not yet resolved) - a
+  // second click/Enter on the same item while it's still in flight is
+  // ignored outright, rather than racing two adds for the same item before
+  // the cart-membership filter below has a chance to exclude it.
+  const pendingPickIds = new Set();
 
   function render(query) {
     items = getCandidates(query);
@@ -1129,11 +1142,23 @@ function setupSuggestDropdown(inputEl, listEl, { getCandidates, getAvailability,
     const chosen = items[idx];
     if (!chosen) return;
     // Unavailable / actively-reserved-by-someone-else rows are shown for
-    // context but do nothing when clicked/selected - only hide (and add)
-    // once we know this one is actually pickable.
+    // context but do nothing when clicked/selected.
     if (!getAvailability(chosen).clickable) return;
-    hide();
-    if (chosen) onPick(chosen);
+    // Already mid-add from a previous click on this same item - ignore the
+    // re-click rather than firing a second, overlapping add for it.
+    if (pendingPickIds.has(chosen.equipmentId)) return;
+    pendingPickIds.add(chosen.equipmentId);
+    // Deliberately doesn't hide() or touch inputEl.value - the dropdown
+    // stays open with the same typed query so multiple items can be picked
+    // back-to-back. Once onPick (which may be async) resolves, refresh the
+    // list: a successful add drops this item out via the cart-membership
+    // filter in getCandidates, so it's no longer there to re-click; a
+    // failed add (e.g. it went Unavailable in the meantime) just leaves it
+    // there, pickable again.
+    Promise.resolve(onPick(chosen)).then(() => {
+      pendingPickIds.delete(chosen.equipmentId);
+      render(inputEl.value.trim());
+    });
   }
 
   function hide() {
@@ -1189,13 +1214,10 @@ setupSuggestDropdown(borrowInput, document.getElementById('borrowSuggestList'), 
       .filter((it) => equipmentLabelMatches(it, query));
   },
   getAvailability: suggestAvailability,
-  onPick: (item) => {
-    // Picked by name/category, not by already knowing the ID - so the box
-    // shows the item name back, never the raw ID, while the real ID is
-    // still what gets added under the hood.
-    borrowInput.value = item.item;
-    handleBorrowAdd(item.equipmentId);
-  },
+  // Deliberately leaves the typed search text alone (see setupSuggestDropdown's
+  // pick()) so picking one item doesn't clear the box - the dropdown stays
+  // open with the same query so multiple items can be added back-to-back.
+  onPick: (item) => handleBorrowAdd(item.equipmentId),
   onEnterFallback: handleBorrowAdd
 });
 
@@ -1207,13 +1229,10 @@ setupSuggestDropdown(reserveInput, document.getElementById('reserveSuggestList')
       .filter((it) => equipmentLabelMatches(it, query));
   },
   getAvailability: suggestAvailability,
-  onPick: (item) => {
-    // Picked by name/category, not by already knowing the ID - so the box
-    // shows the item name back, never the raw ID, while the real ID is
-    // still what gets added under the hood.
-    reserveInput.value = item.item;
-    handleReserveAdd(item.equipmentId);
-  },
+  // Deliberately leaves the typed search text alone (see setupSuggestDropdown's
+  // pick()) so picking one item doesn't clear the box - the dropdown stays
+  // open with the same query so multiple items can be added back-to-back.
+  onPick: (item) => handleReserveAdd(item.equipmentId),
   onEnterFallback: handleReserveAdd
 });
 
