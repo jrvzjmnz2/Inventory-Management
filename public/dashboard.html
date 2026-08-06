@@ -31,7 +31,6 @@
     <!-- ============ MY ITEMS (HOME) TAB ============ -->
     <section id="home" class="tab-panel active">
       <h2>My Items</h2>
-      <p class="scanner-hint">Equipment you currently have reserved or checked out, grouped by event.</p>
       <div class="action-row">
         <button id="refreshHomeBtn" type="button" class="secondary-btn">Refresh</button>
       </div>
@@ -44,7 +43,7 @@
       <table class="cart-table">
         <thead>
           <tr>
-            <th class="admin-only hidden">Equipment ID</th>
+            <th>Equipment ID</th>
             <th>Item</th>
             <th>Status</th>
             <th>Schedule</th>
@@ -114,10 +113,9 @@
     <!-- ============ RETURN TAB ============ -->
     <section id="return" class="tab-panel">
       <h2>Return Equipment</h2>
-      <p class="scanner-hint">Enter the exact Equipment ID or scan its barcode - no name search or suggestions here, so a return always matches a specific item.</p>
 
       <div class="input-row">
-        <input type="text" id="returnInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <input type="text" id="returnInput" placeholder="Scan barcode to return">
         <button id="returnAddBtn" type="button">Add</button>
         <button id="scanReturnBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
@@ -189,14 +187,12 @@
       </div>
 
       <h3>Reservation Start</h3>
-      <p class="scanner-hint">If this is in the future, the item stays available for anyone to borrow until then - the hold only takes effect once the start date/time arrives.</p>
       <div class="input-row">
         <input type="date" id="reserveStartDateInput">
         <input type="time" id="reserveStartTimeInput">
       </div>
 
       <h3>Reservation End</h3>
-      <p class="scanner-hint">Held from the start until this date/time - the reserving employee can borrow and return it as often as needed within that window.</p>
       <div class="input-row">
         <input type="date" id="reserveEndDateInput">
         <input type="time" id="reserveEndTimeInput">

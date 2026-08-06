@@ -380,6 +380,10 @@ main {
 }
 
 .suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
   padding: 0.55rem 0.8rem;
   cursor: pointer;
   font-size: 0.88rem;
@@ -395,6 +399,13 @@ main {
   background: var(--surface-soft);
 }
 
+.suggest-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .suggest-id {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -404,6 +415,48 @@ main {
 .suggest-name {
   color: var(--ink-soft);
   margin-left: 0.4rem;
+}
+
+/* Availability badge shown per suggestion row (see suggestAvailability in
+   dashboard.js) - color-codes whether picking that row will actually work. */
+.suggest-status {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.suggest-available {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.suggest-upcoming,
+.suggest-reserved-mine {
+  background: var(--warning-bg);
+  color: var(--amber-dark);
+}
+
+.suggest-reserved,
+.suggest-unavailable {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* Blocked rows (Unavailable, or actively Reserved by someone else) are still
+   shown for context, but clicking/selecting them does nothing - so they look
+   inert rather than inviting a click. */
+.suggest-item-blocked {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.suggest-item-blocked:hover {
+  background: transparent;
 }
 
 .suggest-empty {
@@ -851,6 +904,19 @@ button.event-list-btn:hover {
 
 .event-section-header:first-child td {
   border-top: none;
+}
+
+/* My Items: warning shown under a borrowed item that someone else has
+   pending-reserved starting within the next day - see pendingReturnWarning
+   in dashboard.js. There's no email/push layer in this app, so this inline
+   row is the notification. */
+.my-items-warning-row td {
+  background: var(--warning-bg);
+  color: var(--amber-dark);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--line);
 }
 
 /* My Items: barcode-verified return (camera scan button + physical-scanner

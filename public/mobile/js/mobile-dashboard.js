@@ -87,13 +87,13 @@ const homeMessage = document.getElementById('homeMessage');
 document.getElementById('refreshHomeBtn').addEventListener('click', loadMyItems);
 
 async function loadMyItems() {
-  homeBody.innerHTML = '<tr class="empty-row"><td colspan="4">Loading your items…</td></tr>';
+  homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Loading your items…</td></tr>';
   setMessage(homeMessage, '', null);
   try {
     const res = await fetch(apiUrl('/api/equipment'));
     const items = await res.json();
     if (!res.ok) {
-      homeBody.innerHTML = '<tr class="empty-row"><td colspan="4">Could not load your items.</td></tr>';
+      homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not load your items.</td></tr>';
       return;
     }
 
@@ -119,7 +119,7 @@ async function loadMyItems() {
 
     renderMyItems([...myPending, ...mine]);
   } catch (err) {
-    homeBody.innerHTML = '<tr class="empty-row"><td colspan="4">Could not reach the server.</td></tr>';
+    homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not reach the server.</td></tr>';
   }
 }
 
@@ -143,6 +143,74 @@ function groupItemsByEvent(items) {
 const SCAN_ICON_SVG =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>';
 
+// Makes a text input only accept input from a physical barcode scanner, not
+// manual keyboard typing. A physical scanner acts exactly like a keyboard
+// (it sends real keydown events character-by-character) so there's no
+// browser API that flags "this came from a scanner" - the only observable
+// difference is speed: a scanner fires each character a few milliseconds
+// apart, far faster than any human keystroke. This never writes typed
+// characters into the field at all (every keydown is prevented) - it just
+// buffers them internally and only calls onScan(...) once Enter arrives and
+// every character up to that point arrived within the scanner-speed window.
+// A slower gap anywhere in the sequence invalidates that whole attempt, so
+// someone typing by hand never gets a value out of this field, and the
+// field never visibly shows anything they typed.
+function bindScanOnlyInput(inputEl, onScan) {
+  const MAX_GAP_MS = 50; // physical scanners type each character only a few ms apart
+  let buffer = '';
+  let lastTime = null;
+  let invalidated = false;
+
+  inputEl.addEventListener('keydown', (e) => {
+    // Let Tab (and browser/OS shortcuts using modifier keys) behave
+    // normally - only ordinary character keys and Enter are captured here.
+    if (e.key === 'Tab' || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+
+    if (e.key === 'Enter') {
+      const scanned = buffer;
+      buffer = '';
+      lastTime = null;
+      const wasValid = !invalidated && scanned.length > 0;
+      invalidated = false;
+      if (wasValid) onScan(scanned);
+      return;
+    }
+
+    if (e.key.length !== 1) return; // ignore Shift, Backspace, arrow keys, etc.
+
+    const now = performance.now();
+    if (lastTime !== null && now - lastTime > MAX_GAP_MS) {
+      invalidated = true;
+      buffer = '';
+    }
+    lastTime = now;
+    if (!invalidated) buffer += e.key;
+  });
+
+  // Paste/drag-and-drop don't go through keydown at all, so they'd otherwise
+  // be a way to slip text into this field without ever "typing" it.
+  inputEl.addEventListener('paste', (e) => e.preventDefault());
+  inputEl.addEventListener('drop', (e) => e.preventDefault());
+}
+
+// If someone else has put a future (pending) reservation on an item this
+// employee currently has checked out, borrowing doesn't get blocked by that
+// up front (see routes/borrow.js) - but if it isn't returned in time, that
+// other person's reservation silently lapses and never activates (see
+// autoExpireReservation in routes/equipment.js). There's no email/push layer
+// in this app, so the only way to "notify" the borrower is this on-screen
+// warning in My Items - shown once the pending reservation's start is within
+// a day out, so there's still time to return it beforehand.
+function pendingReturnWarning(i) {
+  const pending = i.pendingReservation;
+  if (!pending || pending.employeeId === i.employeeId) return null;
+  if (new Date(pending.end).getTime() <= Date.now()) return null; // already lapsed
+  const hoursUntilStart = (new Date(pending.start).getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilStart > 24) return null;
+  return pending;
+}
+
 function renderMyItemRow(i) {
   // A pending reservation hasn't started yet - the item is still fully
   // Available to everyone else in the meantime, so there's nothing to
@@ -151,6 +219,7 @@ function renderMyItemRow(i) {
     const pending = i.pendingReservation;
     return `
     <tr>
+      <td><span class="tag-chip">${escapeHtml(i.equipmentId)}</span></td>
       <td>${escapeHtml(i.item)}</td>
       <td><span class="status-pill status-upcoming">Upcoming</span></td>
       <td>${formatDateTime(pending.start)} &rarr; ${formatDateTime(pending.end)}</td>
@@ -183,18 +252,25 @@ function renderMyItemRow(i) {
       ${reservationActive ? `<button class="remove-btn home-end-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">End Reservation</button>` : ''}`;
   }
 
+  const warning = statusLabel === 'Unavailable' ? pendingReturnWarning(i) : null;
+
   return `
   <tr>
+    <td><span class="tag-chip">${escapeHtml(i.equipmentId)}</span></td>
     <td>${escapeHtml(i.item)}</td>
     <td><span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span></td>
     <td>${heldUntil}</td>
     <td class="action-row">${actionsHtml}</td>
-  </tr>`;
+  </tr>${
+    warning
+      ? `<tr class="my-items-warning-row"><td colspan="5">Please return "${escapeHtml(i.item)}" by ${formatDateTime(warning.start)} - it's reserved${warning.event ? ` for "${escapeHtml(warning.event)}"` : ''} starting then.</td></tr>`
+      : ''
+  }`;
 }
 
 function renderMyItems(items) {
   if (items.length === 0) {
-    homeBody.innerHTML = '<tr class="empty-row"><td colspan="4">You don\'t have any equipment reserved or checked out right now.</td></tr>';
+    homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">You don\'t have any equipment reserved or checked out right now.</td></tr>';
     return;
   }
 
@@ -203,7 +279,7 @@ function renderMyItems(items) {
     .map(
       ([eventName, groupItems]) =>
         `<tr class="event-section-header">
-          <td colspan="3">${escapeHtml(eventName)}</td>
+          <td colspan="4">${escapeHtml(eventName)}</td>
           <td class="action-row">
             <button class="secondary-btn event-list-btn" data-event="${escapeHtml(eventName)}" type="button">Create Equipment List</button>
           </td>
@@ -228,16 +304,12 @@ function renderMyItems(items) {
     const itemLabel = group.dataset.item;
     const input = group.querySelector('.home-return-scan-input');
     const camBtn = group.querySelector('.home-scan-camera-btn');
-    // Physical barcode scanners act like a keyboard, typing the code then
-    // an Enter - so focusing this input and scanning is all that's needed,
-    // no button press required for that path.
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        homeReturnByScan(equipmentId, input.value, input, itemLabel);
-      }
-    });
-    // Camera path reuses the same scanner modal as every other tab.
+    // This field only accepts a physical barcode scanner's input, never
+    // manual keyboard typing - see bindScanOnlyInput above.
+    bindScanOnlyInput(input, (scanned) => homeReturnByScan(equipmentId, scanned, input, itemLabel));
+    // Camera path reuses the same scanner modal as every other tab - it sets
+    // input.value directly (see onScanSuccess), bypassing the keydown-timing
+    // check entirely, so it's unaffected by the restriction above.
     camBtn.addEventListener('click', () => startScanner(input, () => homeReturnByScan(equipmentId, input.value, input, itemLabel)));
   });
 }
@@ -643,21 +715,17 @@ const returnCartBody = document.getElementById('returnCartBody');
 const returnCompleteBtn = document.getElementById('returnCompleteBtn');
 const returnStatusMessage = document.getElementById('returnStatusMessage');
 
-// Manual typing is allowed here (unlike Borrow/Reserve, this is deliberately
-// NOT hooked up to the keyword suggestion dropdown - no name search here).
-// handleReturnAdd() below always does an exact equipmentId lookup via
-// GET /api/equipment/:id, so whatever's typed only ever matches that one
-// specific ID - never a fuzzy/partial or item-name match.
-returnInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    handleReturnAdd();
-  }
-});
+// This field only accepts a physical barcode scanner's input, never manual
+// keyboard typing - see bindScanOnlyInput. Deliberately NOT hooked up to the
+// keyword suggestion dropdown either (unlike Borrow/Reserve) - no name
+// search here. handleReturnAdd() below always does an exact equipmentId
+// lookup via GET /api/equipment/:id, so whatever's scanned only ever matches
+// that one specific ID - never a fuzzy/partial or item-name match.
+bindScanOnlyInput(returnInput, (scanned) => handleReturnAdd(scanned));
 returnAddBtn.addEventListener('click', handleReturnAdd);
 
-async function handleReturnAdd() {
-  const id = returnInput.value.trim();
+async function handleReturnAdd(overrideId) {
+  const id = (typeof overrideId === 'string' ? overrideId : returnInput.value).trim();
   setMessage(returnMessage, '', null);
 
   if (!id) {
@@ -976,7 +1044,45 @@ reserveCompleteBtn.addEventListener('click', async () => {
 // list) so people don't have to remember/type the exact ID. Deliberately
 // left off the Return tab - Return is barcode-scan only so a return always
 // matches a physical item actually in hand.
-function setupSuggestDropdown(inputEl, listEl, { getCandidates, onPick, onEnterFallback }) {
+// Computes the availability badge/clickability shown per suggestion row.
+// Mobile has no admin/on-behalf concept, so the acting employee is always
+// the logged-in employeeId. Five outcomes, matching how Borrow/Reserve are
+// meant to behave from the suggestion dropdown:
+//   - Available (no pending claim either): clickable, adds normally.
+//   - Unavailable (someone has it checked out): not clickable.
+//   - Actively Reserved by someone else (on the shelf, awaiting their
+//     pickup): not clickable.
+//   - Actively Reserved by this employee themselves: clickable (lets them
+//     pick up their own reservation from here too).
+//   - Not currently held by anyone, but already has a future/pending
+//     reservation from someone else: still clickable - the item is
+//     genuinely Available right now, the future hold just hasn't started.
+function suggestAvailability(it) {
+  const statusLabel = normalizeStatusLabel(it.status);
+
+  if (statusLabel === 'Unavailable') {
+    return { label: 'Unavailable', cssClass: 'suggest-unavailable', clickable: false };
+  }
+
+  const reservedActive =
+    statusLabel === 'Reserved' && Boolean(it.reservedUntil) && new Date(it.reservedUntil).getTime() > Date.now();
+  if (reservedActive) {
+    if (it.employeeId === employeeId) {
+      return { label: 'Reserved (yours)', cssClass: 'suggest-reserved-mine', clickable: true };
+    }
+    return { label: 'Reserved', cssClass: 'suggest-reserved', clickable: false };
+  }
+
+  const pendingUnexpired =
+    Boolean(it.pendingReservation) && new Date(it.pendingReservation.end).getTime() > Date.now();
+  if (pendingUnexpired) {
+    return { label: 'Reserved (upcoming)', cssClass: 'suggest-upcoming', clickable: true };
+  }
+
+  return { label: 'Available', cssClass: 'suggest-available', clickable: true };
+}
+
+function setupSuggestDropdown(inputEl, listEl, { getCandidates, getAvailability, onPick, onEnterFallback }) {
   let items = [];
   let activeIdx = -1;
 
@@ -989,13 +1095,17 @@ function setupSuggestDropdown(inputEl, listEl, { getCandidates, onPick, onEnterF
       return;
     }
     listEl.innerHTML = items
-      .map(
-        (it, idx) => `
-        <div class="suggest-item" data-idx="${idx}">
-          <span class="suggest-id">${escapeHtml(it.location) || '-'}</span>
-          <span class="suggest-name">${escapeHtml(it.item)}</span>
-        </div>`
-      )
+      .map((it, idx) => {
+        const avail = getAvailability(it);
+        return `
+        <div class="suggest-item${avail.clickable ? '' : ' suggest-item-blocked'}" data-idx="${idx}">
+          <span class="suggest-main">
+            <span class="suggest-id">${escapeHtml(it.equipmentId)}</span>
+            <span class="suggest-name">${escapeHtml(it.item)}</span>
+          </span>
+          <span class="suggest-status ${avail.cssClass}">${escapeHtml(avail.label)}</span>
+        </div>`;
+      })
       .join('');
     listEl.classList.remove('hidden');
     activeIdx = -1;
@@ -1017,6 +1127,11 @@ function setupSuggestDropdown(inputEl, listEl, { getCandidates, onPick, onEnterF
 
   function pick(idx) {
     const chosen = items[idx];
+    if (!chosen) return;
+    // Unavailable / actively-reserved-by-someone-else rows are shown for
+    // context but do nothing when clicked/selected - only hide (and add)
+    // once we know this one is actually pickable.
+    if (!getAvailability(chosen).clickable) return;
     hide();
     if (chosen) onPick(chosen);
   }
@@ -1066,12 +1181,14 @@ function equipmentLabelMatches(it, query) {
 setupSuggestDropdown(borrowInput, document.getElementById('borrowSuggestList'), {
   getCandidates: (query) => {
     if (!query) return [];
+    // Every matching item is shown regardless of availability now - the
+    // status badge (see suggestAvailability) and disabled look tell people
+    // apart from Available ones, rather than hiding them entirely.
     return inventoryItems
       .filter((it) => !borrowCart.some((c) => c.equipmentId === it.equipmentId))
-      .filter((it) => equipmentLabelMatches(it, query))
-      .filter((it) => normalizeStatusLabel(it.status) === 'Available' || isMyActiveReservation(it))
-      .slice(0, 8);
+      .filter((it) => equipmentLabelMatches(it, query));
   },
+  getAvailability: suggestAvailability,
   onPick: (item) => {
     // Picked by name/category, not by already knowing the ID - so the box
     // shows the item name back, never the raw ID, while the real ID is
@@ -1087,11 +1204,9 @@ setupSuggestDropdown(reserveInput, document.getElementById('reserveSuggestList')
     if (!query) return [];
     return inventoryItems
       .filter((it) => !reserveCart.some((c) => c.equipmentId === it.equipmentId))
-      .filter((it) => equipmentLabelMatches(it, query))
-      .filter((it) => normalizeStatusLabel(it.status) === 'Available')
-      .filter((it) => !(it.pendingReservation && new Date(it.pendingReservation.end).getTime() > Date.now()))
-      .slice(0, 8);
+      .filter((it) => equipmentLabelMatches(it, query));
   },
+  getAvailability: suggestAvailability,
   onPick: (item) => {
     // Picked by name/category, not by already knowing the ID - so the box
     // shows the item name back, never the raw ID, while the real ID is
