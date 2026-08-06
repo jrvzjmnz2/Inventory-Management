@@ -6,7 +6,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#0F2A3F">
+  <meta name="theme-color" content="#25363E">
   <title>Dashboard · Equipment Inventory</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -15,7 +15,10 @@
 </head>
 <body class="mobile-app">
   <header class="topbar">
-    <h1>Equipment Inventory</h1>
+    <div class="topbar-brand">
+      <img class="topbar-logo topbar-logo-icon" src="assets/logos/icon-only-white.png" alt="ITEMHOUND">
+      <h1>Equipment Inventory</h1>
+    </div>
     <div class="user-info">
       <span id="welcomeText"></span>
       <button id="logoutBtn" type="button">Log Out</button>
@@ -23,12 +26,40 @@
   </header>
 
   <main>
+    <!-- ============ MY ITEMS (HOME) TAB ============ -->
+    <section id="home" class="tab-panel active">
+      <h2>My Items</h2>
+      <p class="scanner-hint">Equipment you currently have reserved or checked out, grouped by event.</p>
+      <div class="action-row">
+        <button id="refreshHomeBtn" type="button" class="secondary-btn">Refresh</button>
+      </div>
+      <p id="homeMessage" class="message"></p>
+      <div class="table-scroll">
+        <table class="cart-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Status</th>
+              <th>Schedule</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="homeBody">
+            <tr class="empty-row"><td colspan="4">Loading your items…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ============ BORROW TAB ============ -->
-    <section id="borrow" class="tab-panel active">
+    <section id="borrow" class="tab-panel">
       <h2>Borrow Equipment</h2>
 
       <div class="input-row">
-        <input type="text" id="borrowInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <div class="input-with-suggest">
+          <input type="text" id="borrowInput" placeholder="Enter Equipment ID or item name">
+          <div id="borrowSuggestList" class="suggest-dropdown hidden"></div>
+        </div>
         <button id="borrowAddBtn" type="button">Add</button>
         <button id="scanBorrowBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
@@ -40,10 +71,10 @@
       <div class="table-scroll">
         <table class="cart-table">
           <thead>
-            <tr><th>Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
+            <tr><th>Item</th><th>Comment</th><th></th></tr>
           </thead>
           <tbody id="borrowCartBody">
-            <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+            <tr class="empty-row"><td colspan="3">No equipment added yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -75,6 +106,7 @@
     <!-- ============ RETURN TAB ============ -->
     <section id="return" class="tab-panel">
       <h2>Return Equipment</h2>
+      <p class="scanner-hint">Enter the exact Equipment ID or scan its barcode - no name search or suggestions here, so a return always matches a specific item.</p>
 
       <div class="input-row">
         <input type="text" id="returnInput" placeholder="Enter Equipment ID (e.g. EQ001)">
@@ -89,10 +121,10 @@
       <div class="table-scroll">
         <table class="cart-table">
           <thead>
-            <tr><th>Equipment ID</th><th>Item</th><th>Current Borrower</th><th></th></tr>
+            <tr><th>Item</th><th>Current Borrower</th><th></th></tr>
           </thead>
           <tbody id="returnCartBody">
-            <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+            <tr class="empty-row"><td colspan="3">No equipment added yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -108,7 +140,10 @@
       <h2>Reserve Equipment</h2>
 
       <div class="input-row">
-        <input type="text" id="reserveInput" placeholder="Enter Equipment ID (e.g. EQ001)">
+        <div class="input-with-suggest">
+          <input type="text" id="reserveInput" placeholder="Enter Equipment ID or item name">
+          <div id="reserveSuggestList" class="suggest-dropdown hidden"></div>
+        </div>
         <button id="reserveAddBtn" type="button">Add</button>
         <button id="scanReserveBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
@@ -120,10 +155,10 @@
       <div class="table-scroll">
         <table class="cart-table">
           <thead>
-            <tr><th>Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
+            <tr><th>Item</th><th>Comment</th><th></th></tr>
           </thead>
           <tbody id="reserveCartBody">
-            <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
+            <tr class="empty-row"><td colspan="3">No equipment added yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -145,9 +180,18 @@
         <input type="text" id="reserveEventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
       </div>
 
-      <h3>Date Needed</h3>
+      <h3>Reservation Start</h3>
+      <p class="scanner-hint">If this is in the future, the item stays available for anyone to borrow until then - the hold only takes effect once the start date/time arrives.</p>
       <div class="input-row">
-        <input type="date" id="reserveDateInput">
+        <input type="date" id="reserveStartDateInput">
+        <input type="time" id="reserveStartTimeInput">
+      </div>
+
+      <h3>Reservation End</h3>
+      <p class="scanner-hint">Held from the start until this date/time - you can borrow and return it as often as needed within that window.</p>
+      <div class="input-row">
+        <input type="date" id="reserveEndDateInput">
+        <input type="time" id="reserveEndTimeInput">
       </div>
 
       <div class="action-row">
@@ -168,7 +212,7 @@
         <table class="cart-table">
           <thead>
             <tr>
-              <th>Equipment ID</th>
+              <th>Location</th>
               <th>Item</th>
               <th>Status</th>
               <th>Comment</th>
@@ -179,7 +223,7 @@
               <th>Last Date Borrowed</th>
             </tr>
             <tr class="filter-row">
-              <th><input type="text" class="col-filter" data-col="equipmentId" placeholder="Filter…"></th>
+              <th><input type="text" class="col-filter" data-col="location" placeholder="Filter…"></th>
               <th><input type="text" class="col-filter" data-col="item" placeholder="Filter…"></th>
               <th>
                 <select class="col-filter" data-col="status">
@@ -207,7 +251,10 @@
 
   <!-- ============ BOTTOM NAVIGATION (mobile only) ============ -->
   <nav class="bottom-nav">
-    <button class="tab-btn active" data-tab="borrow" type="button">
+    <button class="tab-btn active" data-tab="home" type="button">
+      <span class="bn-icon">🏠</span><span>My Items</span>
+    </button>
+    <button class="tab-btn" data-tab="borrow" type="button">
       <span class="bn-icon">📦</span><span>Borrow</span>
     </button>
     <button class="tab-btn" data-tab="return" type="button">

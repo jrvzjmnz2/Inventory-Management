@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+const JSZip = require('jszip');
 const express = require('express');
 const {
   Document,
@@ -10,12 +13,58 @@ const {
   WidthType,
   HeadingLevel,
   AlignmentType,
-  ShadingType
+  ShadingType,
+  ImageRun
 } = require('docx');
 const { getDb } = require('../db');
 const { COLLECTIONS } = require('../constants');
+const { canonicalStatus } = require('../utils/status');
 
 const router = express.Router();
+
+// ---------- MYRUNTIME brand assets (per-event Equipment List only) ----------
+// The rest of this app is ITEMHOUND-branded - this one document deliberately
+// carries MYRUNTIME's brand instead, per that brand's guidelines (palette,
+// DM Sans/Inter typefaces, horizontal logo). Assets are copied into this repo
+// (not read from any external/session-specific path) so the running server
+// doesn't depend on anything outside its own codebase.
+const MYRUNTIME_ASSETS_DIR = path.join(__dirname, '..', 'assets', 'branding', 'myruntime');
+const MYRUNTIME_COLORS = {
+  navy: '052941',
+  orange: 'FC6B25',
+  teal: '1E4E65',
+  lightGray: 'ECECEC',
+  white: 'FFFFFF'
+};
+// Loaded once at startup rather than per-request.
+const myruntimeLogoBuffer = fs.readFileSync(path.join(MYRUNTIME_ASSETS_DIR, 'horizontal-logo-color.png'));
+const myruntimeFonts = [
+  { name: 'DM Sans', data: fs.readFileSync(path.join(MYRUNTIME_ASSETS_DIR, 'fonts', 'DMSans-VariableFont_opsz_wght.ttf')) },
+  { name: 'Inter', data: fs.readFileSync(path.join(MYRUNTIME_ASSETS_DIR, 'fonts', 'Inter-VariableFont_opsz_wght.ttf')) }
+];
+// Actual logo file is 2999x764 (ratio ~3.925:1) - scaled down keeping that
+// exact ratio, never set independently, per the brand's logo rules.
+const MYRUNTIME_LOGO_WIDTH = 220;
+const MYRUNTIME_LOGO_HEIGHT = Math.round(MYRUNTIME_LOGO_WIDTH / (2999 / 764));
+
+// The `docx` package writes embedded font *data* and the fontTable.xml
+// relationships correctly, but doesn't set the document-level flag that
+// tells Word to actually load embedded fonts on open rather than silently
+// substitute/ignore them. Patch that in as a small post-processing pass over
+// the already-built .docx (itself just a zip archive) - this is the
+// "actually embed the fonts" step, not just naming them.
+async function embedFontsFlag(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const settingsFile = zip.file('word/settings.xml');
+  if (!settingsFile) return buffer;
+
+  const settingsXml = await settingsFile.async('string');
+  if (settingsXml.includes('embedTrueTypeFonts')) return buffer;
+
+  const patched = settingsXml.replace(/(<w:settings[^>]*>)/, '$1<w:embedTrueTypeFonts w:val="true"/>');
+  zip.file('word/settings.xml', patched);
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
 
 function headerCell(text, widthPercent) {
   return new TableCell({
@@ -142,6 +191,128 @@ router.get('/:employeeId', async (req, res) => {
     }
 
     const filename = `Borrow_Record_${employeeId}_${Date.now()}.docx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error while generating the document.', error: err.message });
+  }
+});
+
+// GET /api/export/event/:employeeId?event=<event name, or "No Event">
+// Builds a .docx listing just the equipment this employee currently has
+// reserved or checked out under one specific event - the "Create Equipment
+// List" button on each event section of the My Items tab. Uses the exact
+// same grouping rule as that tab (utils/status.js's canonicalStatus plus a
+// blank/missing event falling under "No Event") so the list always matches
+// what's shown on screen. No miscellaneous items section here, since misc
+// items aren't tied to any event - that's still covered by the broader
+// per-employee Borrow Record export above.
+router.get('/event/:employeeId', async (req, res) => {
+  try {
+    const db = getDb();
+    const employeeId = req.params.employeeId.trim();
+    const requestedEvent = typeof req.query.event === 'string' ? req.query.event.trim() : '';
+
+    if (!requestedEvent) {
+      return res.status(400).json({ message: 'An event name is required.' });
+    }
+
+    const employee = await db.collection(COLLECTIONS.EMPLOYEES).findOne({ employeeId });
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found.' });
+    }
+
+    const allItems = await db
+      .collection(COLLECTIONS.EQUIPMENT)
+      .find({ employeeId })
+      .sort({ equipmentId: 1 })
+      .toArray();
+
+    const equipmentList = allItems.filter((eq) => {
+      const status = canonicalStatus(eq.status);
+      if (status !== 'Reserved' && status !== 'Unavailable') return false;
+      const key = (eq.event && eq.event.trim()) || 'No Event';
+      return key === requestedEvent;
+    });
+
+    if (equipmentList.length === 0) {
+      return res.status(404).json({
+        message: `No equipment found for "${employee.name}" under "${requestedEvent}".`
+      });
+    }
+
+    // Only the item name matters here - equipment ID, status, comment,
+    // additional information, and purpose are deliberately left off this
+    // document. Several rows sharing the same item name collapse into a
+    // single line with a quantity, rather than repeating the name.
+    const countByItem = new Map();
+    equipmentList.forEach((eq) => {
+      const name = (eq.item || '').trim() || 'Unnamed item';
+      countByItem.set(name, (countByItem.get(name) || 0) + 1);
+    });
+    const itemLines = [...countByItem.entries()].sort(([a], [b]) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    const children = [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 200 },
+        children: [
+          new ImageRun({
+            data: myruntimeLogoBuffer,
+            transformation: { width: MYRUNTIME_LOGO_WIDTH, height: MYRUNTIME_LOGO_HEIGHT }
+          })
+        ]
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 150 },
+        children: [
+          new TextRun({ text: 'Equipment List', font: 'DM Sans', bold: true, size: 56, color: MYRUNTIME_COLORS.navy })
+        ]
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 40 },
+        children: [
+          new TextRun({ text: 'Employee: ', font: 'Inter', bold: true, size: 22, color: MYRUNTIME_COLORS.teal }),
+          new TextRun({ text: `${employee.name} (${employee.employeeId})`, font: 'Inter', size: 22, color: MYRUNTIME_COLORS.teal })
+        ]
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 300 },
+        children: [
+          new TextRun({ text: 'Event: ', font: 'Inter', bold: true, size: 22, color: MYRUNTIME_COLORS.teal }),
+          new TextRun({ text: requestedEvent, font: 'Inter', size: 22, color: MYRUNTIME_COLORS.orange, bold: true })
+        ]
+      }),
+      ...itemLines.map(
+        ([name, qty]) =>
+          new Paragraph({
+            bullet: { level: 0 },
+            spacing: { after: 80 },
+            children: [
+              new TextRun({ text: name, font: 'Inter', size: 24, color: MYRUNTIME_COLORS.navy }),
+              ...(qty > 1
+                ? [new TextRun({ text: ` (x${qty})`, font: 'Inter', size: 24, bold: true, color: MYRUNTIME_COLORS.orange })]
+                : [])
+            ]
+          })
+      )
+    ];
+
+    const doc = new Document({ fonts: myruntimeFonts, sections: [{ children }] });
+    const rawBuffer = await Packer.toBuffer(doc);
+    const buffer = await embedFontsFlag(rawBuffer);
+
+    const safeEvent = requestedEvent.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'Event';
+    const filename = `Equipment_List_${employeeId}_${safeEvent}_${Date.now()}.docx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader(
       'Content-Type',

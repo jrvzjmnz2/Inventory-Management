@@ -6,10 +6,75 @@ const {
   ADMIN_EMPLOYEE_ID,
   EQUIPMENT_STATUS_OPTIONS,
   EQUIPMENT_ADMIN_EDITABLE_FIELDS,
-  CSV_IMPORT_COLUMNS
+  CSV_IMPORT_COLUMNS,
+  CSV_IMPORT_OPTIONAL_COLUMNS
 } = require('../constants');
 const { parseCsv } = require('../utils/csv');
-const { canonicalStatus } = require('../utils/status');
+const {
+  canonicalStatus,
+  isReservationActive,
+  isPendingReservationDue,
+  isPendingReservationLapsed
+} = require('../utils/status');
+
+// Runs on every equipment read (list + single lookup) so the DB self-heals
+// the next time anyone looks at the inventory, rather than needing a cron
+// job this app doesn't have. Mutates and returns the same doc so callers can
+// build their response off the corrected values immediately. Two things can
+// happen here:
+//
+//  1) An active hold whose end date/time has already passed gets released
+//     back to Available.
+//  2) A pending (future-start) reservation gets activated once its start
+//     date/time arrives - but only if the item happens to be Available right
+//     at that moment. If something else has it (borrowed, or another active
+//     reservation), activation is simply deferred and re-tried on the next
+//     read; if the pending reservation's own end time passes before that
+//     ever happens, it's dropped instead since there's nothing left to
+//     activate.
+async function autoExpireReservation(equipmentCollection, item) {
+  if (canonicalStatus(item.status) === 'Reserved' && item.reservedUntil && !isReservationActive(item)) {
+    await equipmentCollection.updateOne(
+      { equipmentId: item.equipmentId },
+      { $set: { status: 'Available', employeeId: null, purpose: null, event: null, reservedUntil: null } }
+    );
+    item.status = 'Available';
+    item.employeeId = null;
+    item.purpose = null;
+    item.event = null;
+    item.reservedUntil = null;
+  }
+
+  if (item.pendingReservation) {
+    if (isPendingReservationLapsed(item)) {
+      await equipmentCollection.updateOne({ equipmentId: item.equipmentId }, { $set: { pendingReservation: null } });
+      item.pendingReservation = null;
+    } else if (isPendingReservationDue(item) && canonicalStatus(item.status) === 'Available') {
+      const pending = item.pendingReservation;
+      await equipmentCollection.updateOne(
+        { equipmentId: item.equipmentId },
+        {
+          $set: {
+            status: 'Reserved',
+            employeeId: pending.employeeId,
+            purpose: pending.purpose,
+            event: pending.event,
+            reservedUntil: pending.end,
+            pendingReservation: null
+          }
+        }
+      );
+      item.status = 'Reserved';
+      item.employeeId = pending.employeeId;
+      item.purpose = pending.purpose;
+      item.event = pending.event;
+      item.reservedUntil = pending.end;
+      item.pendingReservation = null;
+    }
+  }
+
+  return item;
+}
 
 const router = express.Router();
 
@@ -36,7 +101,9 @@ router.get('/meta/purposes', (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const db = getDb();
-    const items = await db.collection(COLLECTIONS.EQUIPMENT).find().sort({ equipmentId: 1 }).toArray();
+    const equipmentCollection = db.collection(COLLECTIONS.EQUIPMENT);
+    const items = await equipmentCollection.find().sort({ equipmentId: 1 }).toArray();
+    await Promise.all(items.map((i) => autoExpireReservation(equipmentCollection, i)));
 
     const employeeIds = [
       ...new Set(items.flatMap((i) => [i.employeeId, i.lastBorrowedBy]).filter(Boolean))
@@ -59,10 +126,15 @@ router.get('/', async (req, res) => {
       status: canonicalStatus(i.status) || i.status,
       comment: i.comment || '',
       additionalInfo: i.additionalInfo || '',
+      ports: i.ports || '',
+      location: i.location || '',
+      category: i.category || '',
       employeeId: i.employeeId || null,
       employeeName: i.employeeId ? nameByEmployeeId[i.employeeId] || 'Unknown' : null,
       purpose: i.purpose || null,
       event: i.event || null,
+      reservedUntil: i.reservedUntil || null,
+      pendingReservation: i.pendingReservation || null,
       lastBorrowedBy: i.lastBorrowedBy || null,
       lastBorrowedByName: i.lastBorrowedBy ? nameByEmployeeId[i.lastBorrowedBy] || 'Unknown' : null,
       lastBorrowedAt: i.lastBorrowedAt || null
@@ -79,11 +151,13 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
+    const equipmentCollection = db.collection(COLLECTIONS.EQUIPMENT);
     const equipmentId = req.params.id.trim();
-    const item = await db.collection(COLLECTIONS.EQUIPMENT).findOne({ equipmentId });
+    const item = await equipmentCollection.findOne({ equipmentId });
     if (!item) {
       return res.status(404).json({ message: `Equipment ID "${equipmentId}" was not found.` });
     }
+    await autoExpireReservation(equipmentCollection, item);
 
     let employeeName = null;
     if (item.employeeId) {
@@ -103,10 +177,15 @@ router.get('/:id', async (req, res) => {
       status: canonicalStatus(item.status) || item.status,
       comment: item.comment || '',
       additionalInfo: item.additionalInfo || '',
+      ports: item.ports || '',
+      location: item.location || '',
+      category: item.category || '',
       employeeId: item.employeeId || null,
       employeeName,
       purpose: item.purpose || null,
       event: item.event || null,
+      reservedUntil: item.reservedUntil || null,
+      pendingReservation: item.pendingReservation || null,
       lastBorrowedBy: item.lastBorrowedBy || null,
       lastBorrowedByName,
       lastBorrowedAt: item.lastBorrowedAt || null
@@ -249,8 +328,23 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
         }
         break;
       }
-      case 'event': {
+      case 'event':
+      case 'ports':
+      case 'location':
+      case 'category': {
         toStore = raw || '';
+        break;
+      }
+      case 'reservedUntil': {
+        if (!raw) {
+          toStore = null;
+        } else {
+          const parsed = new Date(raw);
+          if (Number.isNaN(parsed.getTime())) {
+            return res.status(400).json({ message: 'Enter a valid date/time, or leave it blank.' });
+          }
+          toStore = parsed;
+        }
         break;
       }
       default: {
@@ -271,11 +365,14 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
 });
 
 // POST /api/equipment/import - Admin-only CSV import. Body: { csv, requesterId }
-// Expects a header row containing (in any order): additionalInfo, comment,
-// employeeId, equipmentId, item, status. Only inserts equipmentIds that
-// aren't already in the inventory - any equipmentId that already exists is
-// skipped (left untouched) rather than updated, so a re-imported or
-// overlapping CSV can never overwrite current inventory data.
+// Requires a header row containing (in any order): additionalInfo, comment,
+// employeeId, equipmentId, item, status. Also recognizes optional ports,
+// location, and category columns if present - a CSV missing those simply
+// imports with those fields blank, so older files still work unchanged. Only
+// inserts equipmentIds that aren't already in the inventory - any
+// equipmentId that already exists is skipped (left untouched) rather than
+// updated, so a re-imported or overlapping CSV can never overwrite current
+// inventory data.
 router.post('/import', requireAdmin, async (req, res) => {
   try {
     const { csv } = req.body;
@@ -301,6 +398,10 @@ router.post('/import', requireAdmin, async (req, res) => {
         message: `The CSV is missing required column(s): ${missingColumns.join(', ')}.`
       });
     }
+
+    // Optional columns are never required, but note which ones this file
+    // actually included so the summary message can say so.
+    const includedOptionalColumns = CSV_IMPORT_OPTIONAL_COLUMNS.filter((c) => headerSet.has(c));
 
     const db = getDb();
     const equipment = db.collection(COLLECTIONS.EQUIPMENT);
@@ -346,9 +447,14 @@ router.post('/import', requireAdmin, async (req, res) => {
         status,
         comment: (row.comment || '').trim(),
         additionalInfo: (row.additionalInfo || '').trim(),
+        ports: (row.ports || '').trim(),
+        location: (row.location || '').trim(),
+        category: (row.category || '').trim(),
         employeeId: (row.employeeId || '').trim() || null,
         purpose: null,
         event: null,
+        reservedUntil: null,
+        pendingReservation: null,
         lastBorrowedBy: null,
         lastBorrowedAt: null
       });
@@ -357,7 +463,9 @@ router.post('/import', requireAdmin, async (req, res) => {
     }
 
     res.json({
-      message: `Import complete: ${inserted} added${skipped.length ? `, ${skipped.length} skipped (already in inventory or invalid)` : ''}.`,
+      message: `Import complete: ${inserted} added${skipped.length ? `, ${skipped.length} skipped (already in inventory or invalid)` : ''}.${
+        includedOptionalColumns.length ? ` Included: ${includedOptionalColumns.join(', ')}.` : ''
+      }`,
       inserted,
       skipped
     });

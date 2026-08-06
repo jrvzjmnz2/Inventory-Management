@@ -42,6 +42,42 @@ function setMessage(el, text, type) {
   if (type) el.classList.add(type);
 }
 
+// The raw Equipment ID is only ever shown to the Admin account - everyone
+// else works off Location/Item/barcode scans instead. Used everywhere a
+// cart/list row used to lead with the ID, so the cell's hidden state always
+// matches its table's own admin-only-hidden header (keeping column count and
+// alignment intact either way).
+function idCell(equipmentId) {
+  return isAdmin ? `<td><span class="tag-chip">${escapeHtml(equipmentId)}</span></td>` : '<td class="hidden"></td>';
+}
+
+// Same idea for the " (EQ001)" suffix that used to tag along on Borrow/
+// Return/Reserve status messages - Admin still sees it, everyone else just
+// gets the item name on its own.
+function idSuffix(equipmentId) {
+  return isAdmin ? ` (${equipmentId})` : '';
+}
+
+// For the conflict/invalid lists returned when completing a cart - Admin
+// still gets "Item" (EQ001), everyone else just gets "Item" (looked up from
+// the cart already sitting in memory, since the conflict response itself
+// only carries the ID).
+function conflictLabel(cart, equipmentId) {
+  const found = cart.find((c) => c.equipmentId === equipmentId);
+  const name = found ? `"${found.item}"` : 'That item';
+  return isAdmin ? `${name} (${equipmentId})` : name;
+}
+
+// For messages built around an ID the user picked from the Borrow/Reserve
+// suggestion dropdown (rather than one they typed or scanned themselves) -
+// Admin still sees the raw ID, everyone else gets the item name looked up
+// from the already-loaded inventory list.
+function idLabel(equipmentId) {
+  if (isAdmin) return equipmentId;
+  const match = inventoryItems.find((it) => it.equipmentId === equipmentId);
+  return match ? `"${match.item}"` : 'That item';
+}
+
 // Some existing inventory rows have their status stored in uppercase
 // (AVAILABLE/UNAVAILABLE/RESERVED) from before this app's own borrow/
 // return/reserve actions settled on proper case (Available/Unavailable/
@@ -97,8 +133,388 @@ tabButtons.forEach((btn) => {
     if (btn.dataset.tab === 'inventory') {
       loadInventory();
     }
+    if (btn.dataset.tab === 'home') {
+      loadMyItems();
+    }
   });
 });
+
+// =======================================================
+// MY ITEMS (HOME) TAB
+// =======================================================
+// Shows only the logged-in employee's own equipment that's currently
+// Reserved (held, on the shelf) or Unavailable (checked out) - anything
+// fully Available isn't "theirs" to act on, so it's left off this view.
+const homeBody = document.getElementById('homeBody');
+const homeMessage = document.getElementById('homeMessage');
+const homeViewIdInput = document.getElementById('homeViewIdInput');
+const homeViewIdBtn = document.getElementById('homeViewIdBtn');
+const homeViewingLabel = document.getElementById('homeViewingLabel');
+document.getElementById('refreshHomeBtn').addEventListener('click', loadMyItems);
+
+// Admin can look up any employee's ID here to see (and act on) their My
+// Items list instead of just their own - everyone else always sees their own
+// items, this whole ID field is admin-only (see .admin-only unhide above).
+let homeViewingId = employeeId;
+
+function setHomeViewingId(targetId) {
+  homeViewingId = (isAdmin && targetId && targetId.trim()) || employeeId;
+  if (isAdmin) {
+    homeViewIdInput.value = homeViewingId === employeeId ? '' : homeViewingId;
+    if (homeViewingId !== employeeId) {
+      setMessage(homeViewingLabel, `Viewing items for "${homeViewingId}". Clear the field and press View to go back to your own.`, null);
+    } else {
+      setMessage(homeViewingLabel, '', null);
+    }
+  }
+  loadMyItems();
+}
+
+if (isAdmin) {
+  homeViewIdBtn.addEventListener('click', () => setHomeViewingId(homeViewIdInput.value));
+  homeViewIdInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setHomeViewingId(homeViewIdInput.value);
+    }
+  });
+}
+
+async function loadMyItems() {
+  homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Loading items…</td></tr>';
+  setMessage(homeMessage, '', null);
+  try {
+    const res = await fetch('/api/equipment');
+    const items = await res.json();
+    if (!res.ok) {
+      homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not load items.</td></tr>';
+      return;
+    }
+
+    const mine = items.filter((i) => {
+      if (i.employeeId !== homeViewingId) return false;
+      const statusLabel = normalizeStatusLabel(i.status);
+      return statusLabel === 'Reserved' || statusLabel === 'Unavailable';
+    });
+
+    // A pending reservation (future start time) doesn't touch employeeId/
+    // status at all - the item stays Available to everyone else in the
+    // meantime - so it has to be pulled in separately here rather than
+    // showing up in the filter above. Shown as its own "Upcoming" row,
+    // grouped by its own pending event name.
+    const myPending = items
+      .filter(
+        (i) =>
+          i.pendingReservation &&
+          i.pendingReservation.employeeId === homeViewingId &&
+          new Date(i.pendingReservation.end).getTime() > Date.now()
+      )
+      .map((i) => ({ ...i, isPending: true, event: i.pendingReservation.event }));
+
+    renderMyItems([...myPending, ...mine]);
+  } catch (err) {
+    homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not reach the server.</td></tr>';
+  }
+}
+
+// Groups by event name (case-sensitive on the literal value, blank/missing
+// events collected under "No Event") and sorts the sections alphabetically,
+// with "No Event" always last since it's not really a named event.
+function groupItemsByEvent(items) {
+  const groups = new Map();
+  items.forEach((i) => {
+    const key = i.event && i.event.trim() ? i.event.trim() : 'No Event';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  });
+  return [...groups.entries()].sort(([a], [b]) => {
+    if (a === 'No Event') return b === 'No Event' ? 0 : 1;
+    if (b === 'No Event') return -1;
+    return a.localeCompare(b);
+  });
+}
+
+const SCAN_ICON_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>';
+
+function renderMyItemRow(i) {
+  // A pending reservation hasn't started yet - the item is still fully
+  // Available to everyone else in the meantime, so there's nothing to
+  // borrow/return/end here, just the option to cancel it before it starts.
+  if (i.isPending) {
+    const pending = i.pendingReservation;
+    return `
+    <tr>
+      ${idCell(i.equipmentId)}
+      <td>${escapeHtml(i.item)}</td>
+      <td><span class="status-pill status-upcoming">Upcoming</span></td>
+      <td>${formatDateTime(pending.start)} &rarr; ${formatDateTime(pending.end)}</td>
+      <td class="action-row">
+        <button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel Reservation</button>
+      </td>
+    </tr>`;
+  }
+
+  const statusLabel = normalizeStatusLabel(i.status);
+  const pillClass = statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
+  const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
+  const heldUntil = i.reservedUntil ? formatDateTime(i.reservedUntil) : '-';
+
+  let actionsHtml = '';
+  if (statusLabel === 'Reserved') {
+    actionsHtml = `
+      <button class="secondary-btn home-borrow-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Borrow Now</button>
+      <button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel Reservation</button>`;
+  } else if (statusLabel === 'Unavailable') {
+    // Returning here is barcode-verified, same principle as the Return tab:
+    // scan with the camera, or with a physical (keyboard-emulating) barcode
+    // scanner - either way the scanned code must match this exact item
+    // before it's actually returned. No one-click "just return it" button -
+    // except for Admin looking at someone else's list, who won't have the
+    // physical item on hand to scan in the first place, so a direct button
+    // is offered there instead.
+    const adminViewingOther = isAdmin && homeViewingId !== employeeId;
+    actionsHtml = `
+      ${
+        adminViewingOther
+          ? `<button class="secondary-btn home-admin-return-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Return</button>`
+          : ''
+      }
+      <div class="home-return-scan-group" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}">
+        <input type="text" class="comment-input home-return-scan-input" placeholder="Scan barcode to return">
+        <button class="scan-btn home-scan-camera-btn" type="button" aria-label="Scan with camera to return" title="Scan with camera to return">${SCAN_ICON_SVG}</button>
+      </div>
+      ${reservationActive ? `<button class="remove-btn home-end-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">End Reservation</button>` : ''}`;
+  }
+
+  return `
+  <tr>
+    ${idCell(i.equipmentId)}
+    <td>${escapeHtml(i.item)}</td>
+    <td><span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span></td>
+    <td>${heldUntil}</td>
+    <td class="action-row">${actionsHtml}</td>
+  </tr>`;
+}
+
+function renderMyItems(items) {
+  if (items.length === 0) {
+    const who = homeViewingId === employeeId ? 'You don\'t' : `"${escapeHtml(homeViewingId)}" doesn't`;
+    homeBody.innerHTML = `<tr class="empty-row"><td colspan="5">${who} have any equipment reserved or checked out right now.</td></tr>`;
+    return;
+  }
+
+  const groups = groupItemsByEvent(items);
+  homeBody.innerHTML = groups
+    .map(
+      ([eventName, groupItems]) =>
+        `<tr class="event-section-header">
+          <td colspan="${isAdmin ? 4 : 3}">${escapeHtml(eventName)}</td>
+          <td class="action-row">
+            <button class="secondary-btn event-list-btn" data-event="${escapeHtml(eventName)}" type="button">Create Equipment List</button>
+          </td>
+        </tr>${groupItems.map(renderMyItemRow).join('')}`
+    )
+    .join('');
+
+  homeBody.querySelectorAll('.event-list-btn').forEach((btn) => {
+    btn.addEventListener('click', () => createEventEquipmentList(btn.dataset.event));
+  });
+  homeBody.querySelectorAll('.home-borrow-btn').forEach((btn) => {
+    btn.addEventListener('click', () => homeBorrowNow(btn.dataset.equipmentId, btn.dataset.item));
+  });
+  homeBody.querySelectorAll('.home-end-btn').forEach((btn) => {
+    btn.addEventListener('click', () => homeCancelReservation(btn.dataset.equipmentId, btn.dataset.item));
+  });
+  homeBody.querySelectorAll('.home-cancel-btn').forEach((btn) => {
+    btn.addEventListener('click', () => homeCancelReservation(btn.dataset.equipmentId, btn.dataset.item));
+  });
+  homeBody.querySelectorAll('.home-admin-return-btn').forEach((btn) => {
+    btn.addEventListener('click', () => homeReturnDirect(btn.dataset.equipmentId, btn.dataset.item));
+  });
+  homeBody.querySelectorAll('.home-return-scan-group').forEach((group) => {
+    const equipmentId = group.dataset.equipmentId;
+    const itemLabel = group.dataset.item;
+    const input = group.querySelector('.home-return-scan-input');
+    const camBtn = group.querySelector('.home-scan-camera-btn');
+    // Physical barcode scanners act like a keyboard, typing the code then
+    // an Enter - so focusing this input and scanning is all that's needed,
+    // no button press required for that path.
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        homeReturnByScan(equipmentId, input.value, input, itemLabel);
+      }
+    });
+    // Camera path reuses the same scanner modal as every other tab.
+    camBtn.addEventListener('click', () => startScanner(input, () => homeReturnByScan(equipmentId, input.value, input, itemLabel)));
+  });
+}
+
+// Downloads a .docx equipment list for one event section - same document
+// generation mechanism as the "Export to Word" button on the Borrow tab
+// (GET a .docx, turn the response into a blob, trigger a download), just
+// scoped to whichever event group the button was clicked under, and for
+// whichever employee is currently being viewed (so Admin looking at
+// someone else's My Items list downloads that employee's list, not their
+// own).
+async function createEventEquipmentList(eventName) {
+  setMessage(homeMessage, 'Generating document…', null);
+  try {
+    const res = await fetch(
+      `/api/export/event/${encodeURIComponent(homeViewingId)}?event=${encodeURIComponent(eventName)}`
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMessage(homeMessage, data.message || 'Could not generate the document.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Equipment_List_${homeViewingId}_${eventName}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    setMessage(homeMessage, 'Document downloaded.', 'success');
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+// One-click "Borrow Now" for an item already shown to be reserved by this
+// employee - reuses the equipment's own existing purpose/event (set back
+// when it was reserved) so it passes the same validation Borrow normally
+// requires, without making the user re-fill a form for something they
+// already specified.
+async function homeBorrowNow(equipmentId, itemLabel) {
+  setMessage(homeMessage, '', null);
+  const label = isAdmin ? equipmentId : itemLabel || 'this item';
+  const forWhom = homeViewingId === employeeId ? 'you' : `"${homeViewingId}"`;
+  const confirmed = await askConfirm(`Borrow "${label}" now? It'll stay reserved for ${forWhom} until it's returned or the hold period ends.`);
+  if (!confirmed) return;
+
+  try {
+    const lookup = await fetch(`/api/equipment/${encodeURIComponent(equipmentId)}`);
+    const eq = await lookup.json();
+    if (!lookup.ok) {
+      setMessage(homeMessage, eq.message || 'Could not look up that item.', 'error');
+      return;
+    }
+
+    const res = await fetch('/api/borrow/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeId: homeViewingId,
+        purpose: eq.purpose,
+        event: eq.event,
+        equipmentIds: [equipmentId],
+        miscItems: []
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not borrow that item.', 'error');
+      return;
+    }
+    setMessage(homeMessage, `Borrowed "${label}".`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+// Returning from My Items is barcode-verified rather than one click: the
+// scanned/typed code has to match this exact equipmentId before anything is
+// sent to the server. That match is itself the confirmation, so unlike the
+// other My Items actions this doesn't also pop the "are you sure" modal.
+async function homeReturnByScan(equipmentId, scannedValue, inputEl, itemLabel) {
+  const scanned = String(scannedValue || '').trim();
+  if (!scanned) return;
+
+  const label = isAdmin ? equipmentId : itemLabel || 'this item';
+  if (scanned.toUpperCase() !== equipmentId.toUpperCase()) {
+    setMessage(homeMessage, `Scanned code "${scanned}" doesn't match "${label}" - scan that item's own barcode.`, 'error');
+    if (inputEl) inputEl.value = '';
+    return;
+  }
+
+  setMessage(homeMessage, '', null);
+  try {
+    const res = await fetch('/api/return/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipmentIds: [equipmentId] })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not return that item.', 'error');
+      if (inputEl) inputEl.value = '';
+      return;
+    }
+    setMessage(homeMessage, `Returned "${label}".`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+    if (inputEl) inputEl.value = '';
+  }
+}
+
+// Admin-only shortcut: when looking at someone else's My Items list, Admin
+// won't have the physical item in hand to scan its barcode, so this returns
+// it directly with a single button press instead - skipping the barcode
+// match that everyone else (including Admin viewing their own list) still
+// goes through.
+async function homeReturnDirect(equipmentId, itemLabel) {
+  setMessage(homeMessage, '', null);
+  const label = isAdmin ? equipmentId : itemLabel || 'this item';
+  const confirmed = await askConfirm(`Return "${label}" for "${homeViewingId}" without scanning its barcode?`);
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch('/api/return/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipmentIds: [equipmentId] })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not return that item.', 'error');
+      return;
+    }
+    setMessage(homeMessage, `Returned "${label}".`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
+
+async function homeCancelReservation(equipmentId, itemLabel) {
+  setMessage(homeMessage, '', null);
+  const label = isAdmin ? equipmentId : itemLabel || 'this item';
+  const confirmed = await askConfirm(`Cancel/end the reservation on "${label}"?`);
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch('/api/reserve/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeId: homeViewingId, equipmentIds: [equipmentId] })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMessage(homeMessage, data.message || 'Could not cancel that reservation.', 'error');
+      return;
+    }
+    setMessage(homeMessage, `Reservation on "${label}" cancelled.`, 'success');
+    loadMyItems();
+  } catch (err) {
+    setMessage(homeMessage, 'Could not reach the server.', 'error');
+  }
+}
 
 // =======================================================
 // BORROW TAB
@@ -197,16 +613,25 @@ function createMiscChecklist(containerEl) {
 
 const borrowMisc = createMiscChecklist(document.getElementById('miscChecklist'));
 
-borrowInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    handleBorrowAdd();
-  }
-});
 borrowAddBtn.addEventListener('click', handleBorrowAdd);
 
-async function handleBorrowAdd() {
-  const id = borrowInput.value.trim();
+// Reserving equipment lets the reserving employee borrow/return it as many
+// times as they like within the hold window without releasing it early -
+// so an item that's Reserved by whoever is about to do this borrow (self,
+// or the on-behalf employee for Admin) is addable here too, not just plain
+// Available items.
+function isMyActiveReservation(data) {
+  const actingId = isAdmin ? borrowOnBehalfInput.value.trim() || employeeId : employeeId;
+  return (
+    normalizeStatusLabel(data.status) === 'Reserved' &&
+    data.employeeId === actingId &&
+    Boolean(data.reservedUntil) &&
+    new Date(data.reservedUntil).getTime() > Date.now()
+  );
+}
+
+async function handleBorrowAdd(overrideId) {
+  const id = (typeof overrideId === 'string' ? overrideId : borrowInput.value).trim();
   setMessage(borrowMessage, '', null);
 
   if (!id) {
@@ -214,7 +639,7 @@ async function handleBorrowAdd() {
     return;
   }
   if (borrowCart.some((c) => c.equipmentId === id)) {
-    setMessage(borrowMessage, `Equipment "${id}" is already in your cart.`, 'error');
+    setMessage(borrowMessage, `${idLabel(id)} is already in your cart.`, 'error');
     return;
   }
 
@@ -227,13 +652,13 @@ async function handleBorrowAdd() {
       return;
     }
 
-    if (normalizeStatusLabel(data.status) !== 'Available') {
+    if (normalizeStatusLabel(data.status) !== 'Available' && !isMyActiveReservation(data)) {
       const borrower = data.employeeName
         ? `${data.employeeName} (${data.employeeId})`
         : data.employeeId || 'another employee';
       setMessage(
         borrowMessage,
-        `"${data.item}" (${data.equipmentId}) is currently borrowed by ${borrower}. Please select another item.`,
+        `"${data.item}"${idSuffix(data.equipmentId)} is currently borrowed by ${borrower}. Please select another item.`,
         'error'
       );
       return;
@@ -241,7 +666,7 @@ async function handleBorrowAdd() {
 
     borrowCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
     borrowInput.value = '';
-    setMessage(borrowMessage, `Added "${data.item}" (${data.equipmentId}) to cart.`, 'success');
+    setMessage(borrowMessage, `Added "${data.item}"${idSuffix(data.equipmentId)} to cart.`, 'success');
     renderBorrowCart();
   } catch (err) {
     setMessage(borrowMessage, 'Could not reach the server.', 'error');
@@ -257,7 +682,7 @@ function renderBorrowCart() {
     .map(
       (c, idx) => `
       <tr>
-        <td><span class="tag-chip">${escapeHtml(c.equipmentId)}</span></td>
+        ${idCell(c.equipmentId)}
         <td>${escapeHtml(c.item)}</td>
         <td>${escapeHtml(c.comment) || '-'}</td>
         <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
@@ -332,9 +757,9 @@ borrowCompleteBtn.addEventListener('click', async () => {
       if (data.conflicts) {
         const lines = data.conflicts.map((c) => {
           if (c.reason === 'unavailable') {
-            return `${c.equipmentId} is now borrowed by ${c.borrowerId}.`;
+            return `${conflictLabel(borrowCart, c.equipmentId)} is now borrowed by ${c.borrowerId}.`;
           }
-          return `${c.equipmentId} was not found.`;
+          return `${conflictLabel(borrowCart, c.equipmentId)} was not found.`;
         });
         setMessage(borrowStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
       } else {
@@ -392,6 +817,11 @@ const returnCartBody = document.getElementById('returnCartBody');
 const returnCompleteBtn = document.getElementById('returnCompleteBtn');
 const returnStatusMessage = document.getElementById('returnStatusMessage');
 
+// Manual typing is allowed here (unlike Borrow/Reserve, this is deliberately
+// NOT hooked up to the keyword suggestion dropdown - no name search here).
+// handleReturnAdd() below always does an exact equipmentId lookup via
+// GET /api/equipment/:id, so whatever's typed only ever matches that one
+// specific ID - never a fuzzy/partial or item-name match.
 returnInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -423,8 +853,12 @@ async function handleReturnAdd() {
     }
 
     const returnStatusLabel = normalizeStatusLabel(data.status);
-    if (returnStatusLabel !== 'Unavailable' && returnStatusLabel !== 'Reserved') {
-      setMessage(returnMessage, `"${data.item}" (${data.equipmentId}) is not currently borrowed or reserved.`, 'error');
+    if (returnStatusLabel !== 'Unavailable') {
+      const reason =
+        returnStatusLabel === 'Reserved'
+          ? 'is only reserved (not checked out) - use Cancel Reservation on the My Items tab to release it early'
+          : 'is not currently checked out';
+      setMessage(returnMessage, `"${data.item}"${idSuffix(data.equipmentId)} ${reason}.`, 'error');
       return;
     }
 
@@ -434,7 +868,7 @@ async function handleReturnAdd() {
       borrowerId: data.employeeName ? `${data.employeeName} (${data.employeeId})` : data.employeeId
     });
     returnInput.value = '';
-    setMessage(returnMessage, `Added "${data.item}" (${data.equipmentId}) to return cart.`, 'success');
+    setMessage(returnMessage, `Added "${data.item}"${idSuffix(data.equipmentId)} to return cart.`, 'success');
     renderReturnCart();
   } catch (err) {
     setMessage(returnMessage, 'Could not reach the server.', 'error');
@@ -450,7 +884,7 @@ function renderReturnCart() {
     .map(
       (c, idx) => `
       <tr>
-        <td><span class="tag-chip">${escapeHtml(c.equipmentId)}</span></td>
+        ${idCell(c.equipmentId)}
         <td>${escapeHtml(c.item)}</td>
         <td>${escapeHtml(c.borrowerId)}</td>
         <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
@@ -489,7 +923,7 @@ returnCompleteBtn.addEventListener('click', async () => {
 
     if (!res.ok) {
       if (data.invalid) {
-        const lines = data.invalid.map((c) => `${c.equipmentId} (${c.reason.replace('_', ' ')})`);
+        const lines = data.invalid.map((c) => `${conflictLabel(returnCart, c.equipmentId)} (${c.reason.replace('_', ' ')})`);
         setMessage(returnStatusMessage, `${data.message} ${lines.join(', ')}`, 'error');
       } else {
         setMessage(returnStatusMessage, data.message || 'Could not complete the return.', 'error');
@@ -521,20 +955,31 @@ const reserveCompleteBtn = document.getElementById('reserveCompleteBtn');
 const reserveStatusMessage = document.getElementById('reserveStatusMessage');
 const reservePurposeSelect = document.getElementById('reservePurposeSelect');
 const reserveEventInput = document.getElementById('reserveEventInput');
-const reserveDateInput = document.getElementById('reserveDateInput');
+const reserveStartDateInput = document.getElementById('reserveStartDateInput');
+const reserveStartTimeInput = document.getElementById('reserveStartTimeInput');
+const reserveEndDateInput = document.getElementById('reserveEndDateInput');
+const reserveEndTimeInput = document.getElementById('reserveEndTimeInput');
 const reserveOnBehalfInput = document.getElementById('reserveOnBehalfInput');
 const reserveMisc = createMiscChecklist(document.getElementById('miscChecklistReserve'));
 
-reserveInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    handleReserveAdd();
+// Picking a date defaults its time to the start/end of that day (12:00 AM /
+// 11:59 PM) so a reservation can be made with just two date picks - the time
+// fields stay fully editable afterward for anyone who wants a precise hour.
+reserveStartDateInput.addEventListener('change', () => {
+  if (reserveStartDateInput.value && !reserveStartTimeInput.value) {
+    reserveStartTimeInput.value = '00:00';
   }
 });
+reserveEndDateInput.addEventListener('change', () => {
+  if (reserveEndDateInput.value && !reserveEndTimeInput.value) {
+    reserveEndTimeInput.value = '23:59';
+  }
+});
+
 reserveAddBtn.addEventListener('click', handleReserveAdd);
 
-async function handleReserveAdd() {
-  const id = reserveInput.value.trim();
+async function handleReserveAdd(overrideId) {
+  const id = (typeof overrideId === 'string' ? overrideId : reserveInput.value).trim();
   setMessage(reserveMessage, '', null);
 
   if (!id) {
@@ -542,7 +987,7 @@ async function handleReserveAdd() {
     return;
   }
   if (reserveCart.some((c) => c.equipmentId === id)) {
-    setMessage(reserveMessage, `Equipment "${id}" is already in your cart.`, 'error');
+    setMessage(reserveMessage, `${idLabel(id)} is already in your cart.`, 'error');
     return;
   }
 
@@ -556,23 +1001,34 @@ async function handleReserveAdd() {
     }
 
     const reserveStatusLabel = normalizeStatusLabel(data.status);
+    const pendingActive = data.pendingReservation && new Date(data.pendingReservation.end).getTime() > Date.now();
     if (reserveStatusLabel !== 'Available') {
       let reason;
       if (reserveStatusLabel === 'Reserved') {
-        reason = `is already reserved${data.event ? ` for "${data.event}"` : ''}${data.comment ? ` (needed ${data.comment})` : ''}`;
+        reason = `is already reserved${data.event ? ` for "${data.event}"` : ''}${data.reservedUntil ? ` until ${formatDateTime(data.reservedUntil)}` : ''}`;
       } else {
         const borrower = data.employeeName
           ? `${data.employeeName} (${data.employeeId})`
           : data.employeeId || 'another employee';
         reason = `is currently borrowed by ${borrower}`;
       }
-      setMessage(reserveMessage, `"${data.item}" (${data.equipmentId}) ${reason}. Please select another item.`, 'error');
+      setMessage(reserveMessage, `"${data.item}"${idSuffix(data.equipmentId)} ${reason}. Please select another item.`, 'error');
+      return;
+    }
+    if (pendingActive) {
+      setMessage(
+        reserveMessage,
+        `"${data.item}"${idSuffix(data.equipmentId)} already has an upcoming reservation${
+          data.pendingReservation.event ? ` for "${data.pendingReservation.event}"` : ''
+        } starting ${formatDateTime(data.pendingReservation.start)}. Please select another item.`,
+        'error'
+      );
       return;
     }
 
     reserveCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
     reserveInput.value = '';
-    setMessage(reserveMessage, `Added "${data.item}" (${data.equipmentId}) to cart.`, 'success');
+    setMessage(reserveMessage, `Added "${data.item}"${idSuffix(data.equipmentId)} to cart.`, 'success');
     renderReserveCart();
   } catch (err) {
     setMessage(reserveMessage, 'Could not reach the server.', 'error');
@@ -588,7 +1044,7 @@ function renderReserveCart() {
     .map(
       (c, idx) => `
       <tr>
-        <td><span class="tag-chip">${escapeHtml(c.equipmentId)}</span></td>
+        ${idCell(c.equipmentId)}
         <td>${escapeHtml(c.item)}</td>
         <td>${escapeHtml(c.comment) || '-'}</td>
         <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
@@ -626,10 +1082,21 @@ reserveCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
-  const dateValue = reserveDateInput.value;
-  if (reserveCart.length > 0 && !dateValue) {
-    setMessage(reserveStatusMessage, 'Select a date before completing the reservation.', 'error');
+  const startDateValue = reserveStartDateInput.value;
+  const startTimeValue = reserveStartTimeInput.value;
+  const endDateValue = reserveEndDateInput.value;
+  const endTimeValue = reserveEndTimeInput.value;
+  if (reserveCart.length > 0 && (!startDateValue || !startTimeValue || !endDateValue || !endTimeValue)) {
+    setMessage(reserveStatusMessage, 'Select a start and end date/time before completing the reservation.', 'error');
     return;
+  }
+  if (reserveCart.length > 0) {
+    const startCheck = new Date(`${startDateValue}T${startTimeValue}`);
+    const endCheck = new Date(`${endDateValue}T${endTimeValue}`);
+    if (endCheck.getTime() <= startCheck.getTime()) {
+      setMessage(reserveStatusMessage, 'The end date/time must be after the start date/time.', 'error');
+      return;
+    }
   }
 
   // Admin can reserve on behalf of any employee via the extra ID field that
@@ -647,7 +1114,7 @@ reserveCompleteBtn.addEventListener('click', async () => {
 
   const reserveItemCount = reserveCart.length + miscItems.length;
   const confirmed = await askConfirm(
-    `Complete this reservation of ${reserveItemCount} item${reserveItemCount === 1 ? '' : 's'}? The selected equipment will be marked as reserved.`
+    `Complete this reservation of ${reserveItemCount} item${reserveItemCount === 1 ? '' : 's'}? If the start is in the future, the item stays available to everyone until then.`
   );
   if (!confirmed) return;
 
@@ -659,7 +1126,10 @@ reserveCompleteBtn.addEventListener('click', async () => {
         employeeId: actingEmployeeId,
         purpose: purpose || null,
         event: eventValue || null,
-        date: dateValue || null,
+        startDate: startDateValue || null,
+        startTime: startTimeValue || null,
+        endDate: endDateValue || null,
+        endTime: endTimeValue || null,
         equipmentIds: reserveCart.map((c) => c.equipmentId),
         miscItems
       })
@@ -669,10 +1139,13 @@ reserveCompleteBtn.addEventListener('click', async () => {
     if (!res.ok) {
       if (data.conflicts) {
         const lines = data.conflicts.map((c) => {
-          if (c.reason === 'unavailable') {
-            return `${c.equipmentId} is no longer available.`;
+          if (c.reason === 'pending_reservation') {
+            return `${conflictLabel(reserveCart, c.equipmentId)} already has an upcoming reservation from ${c.borrowerId}.`;
           }
-          return `${c.equipmentId} was not found.`;
+          if (c.reason === 'unavailable') {
+            return `${conflictLabel(reserveCart, c.equipmentId)} is no longer available.`;
+          }
+          return `${conflictLabel(reserveCart, c.equipmentId)} was not found.`;
         });
         setMessage(reserveStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
       } else {
@@ -681,17 +1154,157 @@ reserveCompleteBtn.addEventListener('click', async () => {
       return;
     }
 
-    setMessage(reserveStatusMessage, 'Reservation completed successfully.', 'success');
+    setMessage(reserveStatusMessage, data.message || 'Reservation completed successfully.', 'success');
     reserveCart = [];
     reservePurposeSelect.value = '';
     reserveEventInput.value = '';
-    reserveDateInput.value = '';
+    reserveStartDateInput.value = '';
+    reserveStartTimeInput.value = '';
+    reserveEndDateInput.value = '';
+    reserveEndTimeInput.value = '';
     if (isAdmin) reserveOnBehalfInput.value = '';
     renderReserveCart();
     reserveMisc.reset();
   } catch (err) {
     setMessage(reserveStatusMessage, 'Could not reach the server.', 'error');
   }
+});
+
+// =======================================================
+// KEYWORD SUGGESTION DROPDOWN (Borrow & Reserve only - never Return)
+// =======================================================
+// Typing an Equipment ID or item name keyword into the Borrow/Reserve inputs
+// shows a dropdown of matches (built from the already-loaded inventory
+// list) so people don't have to remember/type the exact ID. Deliberately
+// left off the Return tab - Return is barcode-scan only so a return always
+// matches a physical item actually in hand.
+function setupSuggestDropdown(inputEl, listEl, { getCandidates, onPick, onEnterFallback }) {
+  let items = [];
+  let activeIdx = -1;
+
+  function render(query) {
+    items = getCandidates(query);
+    if (items.length === 0) {
+      listEl.innerHTML = query ? '<div class="suggest-empty">No matching equipment.</div>' : '';
+      listEl.classList.toggle('hidden', !query);
+      activeIdx = -1;
+      return;
+    }
+    // The Equipment ID is Admin-only - everyone else gets the item's
+    // Location here instead, still enough to tell apart two rows with the
+    // same item name.
+    listEl.innerHTML = items
+      .map(
+        (it, idx) => `
+        <div class="suggest-item" data-idx="${idx}">
+          <span class="suggest-id">${isAdmin ? escapeHtml(it.equipmentId) : escapeHtml(it.location) || '-'}</span>
+          <span class="suggest-name">${escapeHtml(it.item)}</span>
+        </div>`
+      )
+      .join('');
+    listEl.classList.remove('hidden');
+    activeIdx = -1;
+    listEl.querySelectorAll('.suggest-item').forEach((el) => {
+      // mousedown (not click) fires before the input's blur, so the pick
+      // still runs while the dropdown is visible/selectable.
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        pick(Number(el.dataset.idx));
+      });
+    });
+  }
+
+  function highlight() {
+    listEl.querySelectorAll('.suggest-item').forEach((el, idx) => {
+      el.classList.toggle('active', idx === activeIdx);
+    });
+  }
+
+  function pick(idx) {
+    const chosen = items[idx];
+    hide();
+    if (chosen) onPick(chosen);
+  }
+
+  function hide() {
+    listEl.classList.add('hidden');
+    listEl.innerHTML = '';
+    items = [];
+    activeIdx = -1;
+  }
+
+  inputEl.addEventListener('input', () => render(inputEl.value.trim()));
+  inputEl.addEventListener('focus', () => {
+    if (inputEl.value.trim()) render(inputEl.value.trim());
+  });
+  inputEl.addEventListener('blur', () => {
+    // Delay so a mousedown-triggered pick() above still gets to run first.
+    setTimeout(hide, 150);
+  });
+  inputEl.addEventListener('keydown', (e) => {
+    const visible = !listEl.classList.contains('hidden') && items.length > 0;
+    if (e.key === 'ArrowDown' && visible) {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      highlight();
+    } else if (e.key === 'ArrowUp' && visible) {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      highlight();
+    } else if (e.key === 'Escape') {
+      hide();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (visible) {
+        pick(activeIdx >= 0 ? activeIdx : 0);
+      } else {
+        onEnterFallback();
+      }
+    }
+  });
+}
+
+function equipmentLabelMatches(it, query) {
+  return `${it.equipmentId} ${it.item} ${it.category || ''}`.toLowerCase().includes(query.toLowerCase());
+}
+
+setupSuggestDropdown(borrowInput, document.getElementById('borrowSuggestList'), {
+  getCandidates: (query) => {
+    if (!query) return [];
+    return inventoryItems
+      .filter((it) => !borrowCart.some((c) => c.equipmentId === it.equipmentId))
+      .filter((it) => equipmentLabelMatches(it, query))
+      .filter((it) => normalizeStatusLabel(it.status) === 'Available' || isMyActiveReservation(it))
+      .slice(0, 8);
+  },
+  onPick: (item) => {
+    // Non-admin picked this by name/category, not by already knowing its ID -
+    // so the box shows the item name back, never the raw ID, while the real
+    // ID is still what gets added under the hood.
+    borrowInput.value = isAdmin ? item.equipmentId : item.item;
+    handleBorrowAdd(isAdmin ? undefined : item.equipmentId);
+  },
+  onEnterFallback: handleBorrowAdd
+});
+
+setupSuggestDropdown(reserveInput, document.getElementById('reserveSuggestList'), {
+  getCandidates: (query) => {
+    if (!query) return [];
+    return inventoryItems
+      .filter((it) => !reserveCart.some((c) => c.equipmentId === it.equipmentId))
+      .filter((it) => equipmentLabelMatches(it, query))
+      .filter((it) => normalizeStatusLabel(it.status) === 'Available')
+      .filter((it) => !(it.pendingReservation && new Date(it.pendingReservation.end).getTime() > Date.now()))
+      .slice(0, 8);
+  },
+  onPick: (item) => {
+    // Non-admin picked this by name/category, not by already knowing its ID -
+    // so the box shows the item name back, never the raw ID, while the real
+    // ID is still what gets added under the hood.
+    reserveInput.value = isAdmin ? item.equipmentId : item.item;
+    handleReserveAdd(isAdmin ? undefined : item.equipmentId);
+  },
+  onEnterFallback: handleReserveAdd
 });
 
 // =======================================================
@@ -722,9 +1335,9 @@ document.getElementById('clearFiltersBtn').addEventListener('click', () => {
 });
 
 // ---------- Admin-only: CSV import ----------
-// Adds new equipment or updates existing rows (matched by equipmentId) from
-// a CSV file with additionalInfo, comment, employeeId, equipmentId, item,
-// and status columns.
+// Adds new equipment (never updates existing rows) from a CSV file with
+// additionalInfo, comment, employeeId, equipmentId, item, and status
+// columns required, plus optional ports, location, and category columns.
 const importCsvBtn = document.getElementById('importCsvBtn');
 const importCsvFile = document.getElementById('importCsvFile');
 const importResultMessage = document.getElementById('importResultMessage');
@@ -805,7 +1418,7 @@ function applyInventoryFilters() {
     const lastBorrowedDateText = formatDateTime(i.lastBorrowedAt);
 
     return (
-      textMatches(i.equipmentId, inventoryFilters.equipmentId) &&
+      textMatches(i.location, inventoryFilters.location) &&
       textMatches(i.item, inventoryFilters.item) &&
       // Case-insensitive: some existing inventory rows have status stored
       // in uppercase (AVAILABLE/UNAVAILABLE/RESERVED) while the app's own
@@ -840,7 +1453,7 @@ function renderInventoryRows(items) {
 
   // Plain admin text-field cell: same look as the Comment/Additional Info
   // inputs, but wired to the admin-only PATCH .../field endpoint instead.
-  function adminField(equipmentId, field, value, placeholder) {
+  function adminField(equipmentId, field, value, placeholder, title) {
     return `
       <input
         type="text"
@@ -849,6 +1462,7 @@ function renderInventoryRows(items) {
         data-field="${field}"
         value="${escapeHtml(value || '')}"
         placeholder="${escapeHtml(placeholder || '')}"
+        ${title ? `title="${escapeHtml(title)}"` : ''}
       >`;
   }
 
@@ -865,17 +1479,46 @@ function renderInventoryRows(items) {
       // Admin gets every cell as an editable control; everyone else keeps
       // the existing read-only display (Comment/Additional Info stay
       // editable for all users, unchanged).
-      const equipmentIdCell = isAdmin
-        ? adminField(i.equipmentId, 'equipmentId', i.equipmentId)
-        : `<span class="tag-chip">${escapeHtml(i.equipmentId)}</span>`;
+      // The Equipment ID itself isn't shown here anymore - Location takes
+      // its place as the lead column, since browsing inventory by physical
+      // location is more useful than by ID (the ID lives on the item's own
+      // barcode, scanned directly at Borrow/Return/Reserve time). The ID is
+      // only ever surfaced to Admin, as a hover tooltip on this cell -
+      // everyone else sees Location alone, no ID anywhere, not even on hover.
+      const locationCell = isAdmin
+        ? adminField(i.equipmentId, 'location', i.location, 'Location', `Equipment ID: ${i.equipmentId}`)
+        : `<span class="tag-chip">${escapeHtml(i.location) || '-'}</span>`;
       const itemCell = isAdmin ? adminField(i.equipmentId, 'item', i.item) : escapeHtml(i.item);
-      const statusCell = isAdmin
+      // A reservation hold (reservedUntil) can be active while the item is
+      // physically checked out (status Unavailable, from the reserving
+      // employee borrowing it mid-window). Rather than one pill trying to
+      // say both things at once, show the base Available/Unavailable status
+      // and a separate "Reserved" badge beside it whenever that's the case.
+      const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
+      const showReservedBadge = statusLabel === 'Unavailable' && reservationActive;
+      const reservedBadge = showReservedBadge
+        ? `<span class="status-pill status-reserved-badge" title="${escapeHtml(i.event || '')}">Reserved${
+            i.event ? ` · ${escapeHtml(i.event)}` : ''
+          } until ${formatDateTime(i.reservedUntil)}</span>`
+        : '';
+      // A pending (future-start) reservation doesn't change status at all -
+      // the item stays Available for anyone to borrow/reserve in the
+      // meantime - but it's still worth flagging here so it doesn't look
+      // like this Available item is free indefinitely.
+      const pendingActive = Boolean(i.pendingReservation) && new Date(i.pendingReservation.end).getTime() > Date.now();
+      const upcomingBadge = pendingActive
+        ? `<span class="status-pill status-upcoming-badge" title="${escapeHtml(i.pendingReservation.event || '')}">Upcoming${
+            i.pendingReservation.event ? ` · ${escapeHtml(i.pendingReservation.event)}` : ''
+          } from ${formatDateTime(i.pendingReservation.start)}</span>`
+        : '';
+      const baseStatusControl = isAdmin
         ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="status">
             ${STATUS_OPTIONS.map(
               (opt) => `<option value="${opt}" ${opt === statusLabel ? 'selected' : ''}>${opt}</option>`
             ).join('')}
           </select>`
         : `<span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>`;
+      const statusCell = `<div class="status-cell-group">${baseStatusControl}${reservedBadge}${upcomingBadge}</div>`;
       const borrowedByCell = isAdmin
         ? adminField(i.equipmentId, 'employeeId', i.employeeId, 'Employee ID')
         : borrower;
@@ -894,7 +1537,7 @@ function renderInventoryRows(items) {
 
       return `
       <tr>
-        <td>${equipmentIdCell}</td>
+        <td>${locationCell}</td>
         <td>${itemCell}</td>
         <td>${statusCell}</td>
         <td>
@@ -1027,7 +1670,9 @@ async function saveEditableField(input) {
     if (!res.ok) {
       input.value = input.dataset.original;
       flashCommentInput(input, false);
-      setMessage(inventoryMessage, data.message || `Could not save changes for ${equipmentId}.`, 'error');
+      const match = inventoryItems.find((it) => it.equipmentId === equipmentId);
+      const label = isAdmin ? equipmentId : match ? `"${match.item}"` : 'that item';
+      setMessage(inventoryMessage, data.message || `Could not save changes for ${label}.`, 'error');
     } else {
       input.dataset.original = data[field];
       input.value = data[field];
@@ -1046,6 +1691,7 @@ async function saveEditableField(input) {
 
 // Load inventory once on first page load too, so switching tabs feels instant.
 loadInventory();
+loadMyItems();
 
 // =======================================================
 // BARCODE SCANNER (Borrow & Return)

@@ -39,11 +39,21 @@ const EQUIPMENT_ADMIN_EDITABLE_FIELDS = [
   'employeeId',
   'event',
   'lastBorrowedBy',
-  'lastBorrowedAt'
+  'lastBorrowedAt',
+  'reservedUntil',
+  'ports',
+  'location',
+  'category'
 ];
 
-// Columns expected in an admin CSV import.
+// Columns required in an admin CSV import - a file missing any of these is
+// rejected outright.
 const CSV_IMPORT_COLUMNS = ['additionalInfo', 'comment', 'employeeId', 'equipmentId', 'item', 'status'];
+
+// Extra columns an admin CSV import will recognize and store if present, but
+// won't reject the file for lacking - older CSV files without them still
+// import fine, just leaving these fields blank.
+const CSV_IMPORT_OPTIONAL_COLUMNS = ['ports', 'location', 'category'];
 
 module.exports = {
   COLLECTIONS,
@@ -52,5 +62,6 @@ module.exports = {
   ADMIN_EMPLOYEE_ID,
   EQUIPMENT_STATUS_OPTIONS,
   EQUIPMENT_ADMIN_EDITABLE_FIELDS,
-  CSV_IMPORT_COLUMNS
+  CSV_IMPORT_COLUMNS,
+  CSV_IMPORT_OPTIONAL_COLUMNS
 };

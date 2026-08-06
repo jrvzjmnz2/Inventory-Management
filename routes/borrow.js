@@ -1,7 +1,7 @@
 const express = require('express');
 const { getDb } = require('../db');
 const { COLLECTIONS, PURPOSE_OPTIONS, MISC_ITEMS } = require('../constants');
-const { canonicalStatus } = require('../utils/status');
+const { canonicalStatus, effectiveStatus, isReservationActive } = require('../utils/status');
 
 const router = express.Router();
 
@@ -44,12 +44,24 @@ router.post('/complete', async (req, res) => {
     // Re-check every equipment item right before committing. This guards
     // against another employee borrowing the same item between the moment
     // it was added to this cart and the moment Complete was pressed.
+    //
+    // Two ways an item is borrowable right now:
+    //  - it's plain Available (the normal case), or
+    //  - it's Reserved, but the reservation belongs to this same employee
+    //    and hasn't expired yet - reserving equipment lets that employee
+    //    borrow/return it as many times as they like within the hold
+    //    window without releasing the reservation early.
     const conflicts = [];
     for (const equipmentId of equipmentIds) {
       const eq = await equipment.findOne({ equipmentId });
       if (!eq) {
         conflicts.push({ equipmentId, reason: 'not_found' });
-      } else if (canonicalStatus(eq.status) !== 'Available') {
+        continue;
+      }
+      const status = effectiveStatus(eq);
+      const isMyActiveReservation =
+        status === 'Reserved' && eq.employeeId === employeeId && isReservationActive(eq);
+      if (status !== 'Available' && !isMyActiveReservation) {
         conflicts.push({ equipmentId, reason: 'unavailable', borrowerId: eq.employeeId });
       }
     }

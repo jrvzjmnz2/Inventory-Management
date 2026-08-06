@@ -1,29 +1,29 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
 :root {
-  --ink: #0F2A3F;
-  --ink-soft: #52708A;
-  --bg: #FBF6EF;
+  --ink: #25363E;
+  --ink-soft: #5C6C73;
+  --bg: #FFFFFF;
   --surface: #FFFFFF;
-  --surface-soft: #F8F1E4;
-  --line: #D5DBE0;
-  --amber: #D9B77A;
-  --amber-dark: #B8934F;
-  --teal: #1D4E6E;
-  --teal-dark: #123C54;
+  --surface-soft: #F2F2F2;
+  --line: #D9D9D9;
+  --amber: #630A1F;
+  --amber-dark: #4A0717;
+  --teal: #3E5560;
+  --teal-dark: #2C3E46;
   --danger: #C1443C;
   --danger-bg: #FBEAE5;
   --success: #1E7A43;
   --success-bg: #E9F5EE;
   --warning-bg: #F5EAD3;
 
-  --font-display: 'Space Grotesk', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-display: 'Inter', sans-serif;
+  --font-body: 'Nunito Sans', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 
-  --shadow-sm: 0 2px 8px rgba(15, 42, 63, 0.08);
-  --shadow-md: 0 8px 24px rgba(15, 42, 63, 0.1);
-  --shadow-lg: 0 24px 56px rgba(15, 42, 63, 0.22);
+  --shadow-sm: 0 2px 8px rgba(37, 54, 62, 0.08);
+  --shadow-md: 0 8px 24px rgba(37, 54, 62, 0.1);
+  --shadow-lg: 0 24px 56px rgba(37, 54, 62, 0.22);
 }
 
 * { box-sizing: border-box; }
@@ -74,10 +74,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background:
-    radial-gradient(circle at 15% 15%, rgba(217, 183, 122, 0.12) 0, transparent 45%),
-    radial-gradient(circle at 85% 85%, rgba(29, 78, 110, 0.08) 0, transparent 50%),
-    var(--bg);
+  background: var(--bg);
 }
 
 .login-card {
@@ -89,6 +86,14 @@ select:focus-visible {
   width: 100%;
   max-width: 380px;
   box-shadow: var(--shadow-lg);
+}
+
+.login-logo {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  margin: 0 auto 1.5rem;
 }
 
 .login-card h1 {
@@ -129,7 +134,7 @@ select:focus-visible {
 #loginForm input:focus,
 #registerForm input:focus {
   border-color: var(--amber);
-  box-shadow: 0 0 0 3px rgba(217, 183, 122, 0.25);
+  box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.16);
 }
 
 #loginForm button[type="submit"],
@@ -189,7 +194,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 42, 63, 0.45);
+  background: rgba(37, 54, 62, 0.45);
   opacity: 1;
   transition: opacity 1s ease;
 }
@@ -229,7 +234,7 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, var(--ink), #123956);
+  background: var(--ink);
   color: #fff;
   padding: 1rem 1.75rem;
   border-bottom: 4px solid var(--amber);
@@ -237,6 +242,23 @@ select:focus-visible {
   position: sticky;
   top: 0;
   z-index: 100;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.topbar-logo {
+  display: block;
+  height: 28px;
+  width: auto;
+}
+
+.topbar-logo-icon {
+  height: 32px;
+  width: 32px;
 }
 
 .topbar h1 {
@@ -290,12 +312,12 @@ select:focus-visible {
 }
 
 .tab-btn:hover {
-  background: rgba(217, 183, 122, 0.12);
+  background: rgba(99, 10, 31, 0.06);
   color: var(--ink);
 }
 
 .tab-btn.active {
-  background: rgba(217, 183, 122, 0.18);
+  background: rgba(99, 10, 31, 0.1);
   color: var(--ink);
   border-bottom-color: var(--amber);
 }
@@ -318,6 +340,67 @@ main {
   margin-bottom: 0.75rem;
 }
 
+/* ---------- Keyword suggestion dropdown (Borrow & Reserve only) ---------- */
+
+.input-with-suggest {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.input-with-suggest input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.suggest-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 150;
+}
+
+.suggest-item {
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.suggest-item:last-child {
+  border-bottom: none;
+}
+
+.suggest-item:hover,
+.suggest-item.active {
+  background: var(--surface-soft);
+}
+
+.suggest-id {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.suggest-name {
+  color: var(--ink-soft);
+  margin-left: 0.4rem;
+}
+
+.suggest-empty {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
 .input-row input[type="text"],
 .input-row input[type="date"] {
   flex: 1;
@@ -334,7 +417,7 @@ main {
 .input-row input[type="text"]:focus,
 .input-row input[type="date"]:focus {
   border-color: var(--amber);
-  box-shadow: 0 0 0 3px rgba(217, 183, 122, 0.2);
+  box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.14);
 }
 
 button.primary-btn,
@@ -393,7 +476,7 @@ button.primary-btn:hover,
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: rgba(15, 42, 63, 0.7);
+  background: rgba(37, 54, 62, 0.7);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
@@ -477,6 +560,19 @@ button.secondary-btn {
 button.secondary-btn:hover {
   border-color: var(--teal);
   color: var(--teal);
+}
+
+/* Create Equipment List: dark ink to match the header/topbar color */
+button.event-list-btn {
+  background: var(--ink);
+  color: #fff;
+  border: 1px solid var(--ink);
+}
+
+button.event-list-btn:hover {
+  background: var(--amber-dark);
+  border-color: var(--amber-dark);
+  color: #fff;
 }
 
 .message {
@@ -605,7 +701,7 @@ button.secondary-btn:hover {
 
 .cart-table tbody tr:last-child td { border-bottom: none; }
 .cart-table tbody tr:nth-child(even) { background: var(--surface-soft); }
-.cart-table tbody tr:hover { background: rgba(217, 183, 122, 0.08); }
+.cart-table tbody tr:hover { background: rgba(99, 10, 31, 0.05); }
 
 .filter-row th {
   padding: 0.4rem 0.6rem;
@@ -664,6 +760,43 @@ button.secondary-btn:hover {
   color: var(--amber-dark);
 }
 
+/* An item can be Unavailable (checked out) *and* under an active
+   reservation hold at the same time - rather than one pill trying to say
+   both, the base status pill/select and this badge sit beside each other. */
+.status-cell-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.status-reserved-badge {
+  background: transparent;
+  border: 1px dashed var(--amber-dark);
+  color: var(--amber-dark);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* A pending (future-start) reservation - shown on My Items as its own
+   status pill, and as a badge beside Available in the Inventory table. */
+.status-upcoming {
+  background: rgba(62, 85, 96, 0.12);
+  color: var(--teal-dark);
+}
+
+.status-upcoming-badge {
+  background: transparent;
+  border: 1px dashed var(--teal);
+  color: var(--teal-dark);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .remove-btn {
   background: none;
   border: none;
@@ -677,6 +810,57 @@ button.secondary-btn:hover {
   display: flex;
   gap: 0.75rem;
   margin-bottom: 0.5rem;
+}
+
+/* Home (My Items) tab: per-row action buttons inside a table cell, rather
+   than a page-level action bar - no bottom margin, and free to wrap. */
+.cart-table td.action-row {
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.cart-table td.action-row .secondary-btn,
+.cart-table td.action-row .remove-btn {
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* My Items: event section header row, sitting above that event's rows */
+.event-section-header td {
+  background: var(--surface-soft);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--ink);
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  border-top: 2px solid var(--line);
+}
+
+.event-section-header:first-child td {
+  border-top: none;
+}
+
+/* My Items: barcode-verified return (camera scan button + physical-scanner
+   text input), replacing a one-click Return button */
+.home-return-scan-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.home-return-scan-group .comment-input {
+  border: 1px solid var(--line);
+  min-width: 0;
+  flex: 1;
+}
+
+.home-return-scan-group .scan-btn {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
 }
 
 .empty-row td {
