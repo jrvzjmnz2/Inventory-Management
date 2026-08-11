@@ -96,6 +96,12 @@
         <input type="text" id="eventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
       </div>
 
+      <h3>Borrow Until</h3>
+      <div class="input-row">
+        <input type="date" id="borrowUntilDateInput">
+        <input type="time" id="borrowUntilTimeInput">
+      </div>
+
       <div class="action-row">
         <button id="borrowCompleteBtn" type="button" class="primary-btn">Complete</button>
         <button id="exportBtn" type="button" class="primary-btn" disabled>Export to Word</button>
@@ -209,7 +215,7 @@
         <table class="cart-table">
           <thead>
             <tr>
-              <th>Location</th>
+              <th>Equipment ID</th>
               <th>Item</th>
               <th>Status</th>
               <th>Comment</th>
@@ -220,7 +226,7 @@
               <th>Last Date Borrowed</th>
             </tr>
             <tr class="filter-row">
-              <th><input type="text" class="col-filter" data-col="location" placeholder="Filter…"></th>
+              <th><input type="text" class="col-filter" data-col="equipmentId" placeholder="Filter…"></th>
               <th><input type="text" class="col-filter" data-col="item" placeholder="Filter…"></th>
               <th>
                 <select class="col-filter" data-col="status">

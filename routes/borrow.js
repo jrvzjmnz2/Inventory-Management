@@ -11,15 +11,35 @@ router.get('/misc-items', (req, res) => {
 });
 
 // POST /api/borrow/complete
-// Body: { employeeId, purpose, event, equipmentIds: string[], miscItems: [{ item, amount }] }
+// Body: { employeeId, purpose, event, equipmentIds: string[], miscItems: [{ item, amount }], borrowUntil }
+//
+// borrowUntil is an optional ISO instant string - the due date/time picked on
+// the Borrow tab's "Borrow Until" field. It's optional (rather than required
+// here) because this same endpoint is also used by My Items' "Borrow Now"
+// bulk-borrow actions, which convert an existing reservation straight into a
+// borrow without going through the Borrow tab's form at all. When present,
+// it's stored on each borrowed item so My Items can warn the borrower once
+// the due date/time is within 12 hours (see borrowDueWarning in the client).
 router.post('/complete', async (req, res) => {
   try {
     const db = getDb();
     const equipment = db.collection(COLLECTIONS.EQUIPMENT);
     const miscLogs = db.collection(COLLECTIONS.MISC_LOGS);
 
-    const { employeeId, purpose, event, equipmentIds = [], miscItems = [] } = req.body;
+    const { employeeId, purpose, event, equipmentIds = [], miscItems = [], borrowUntil } = req.body;
     const trimmedEvent = typeof event === 'string' ? event.trim() : '';
+
+    let borrowUntilDate = null;
+    if (borrowUntil) {
+      const parsed = new Date(borrowUntil);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: 'Enter a valid Borrow Until date/time.' });
+      }
+      if (parsed.getTime() <= Date.now()) {
+        return res.status(400).json({ message: 'Borrow Until must be a future date/time.' });
+      }
+      borrowUntilDate = parsed;
+    }
 
     if (!employeeId) {
       return res.status(400).json({ message: 'You must be logged in to borrow equipment.' });
@@ -91,7 +111,8 @@ router.post('/complete', async (req, res) => {
             purpose,
             event: trimmedEvent,
             lastBorrowedBy: employeeId,
-            lastBorrowedAt: new Date()
+            lastBorrowedAt: new Date(),
+            borrowUntil: borrowUntilDate
           }
         }
       );

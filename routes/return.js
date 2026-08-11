@@ -52,14 +52,28 @@ router.post('/complete', async (req, res) => {
     }
 
     // lastBorrowedBy/lastBorrowedAt are intentionally left untouched in both
-    // cases - they're history fields that should survive a return.
+    // cases - they're history fields that should survive a return. borrowUntil
+    // (the Borrow tab's due date/time) is cleared in both cases - the borrow
+    // period is over either way, so there's nothing left to warn about.
     if (backToReservedIds.length > 0) {
-      await equipment.updateMany({ equipmentId: { $in: backToReservedIds } }, { $set: { status: 'Reserved' } });
+      await equipment.updateMany(
+        { equipmentId: { $in: backToReservedIds } },
+        { $set: { status: 'Reserved', borrowUntil: null } }
+      );
     }
     if (fullyReturnedIds.length > 0) {
       await equipment.updateMany(
         { equipmentId: { $in: fullyReturnedIds } },
-        { $set: { status: 'Available', employeeId: null, purpose: null, event: null, reservedUntil: null } }
+        {
+          $set: {
+            status: 'Available',
+            employeeId: null,
+            purpose: null,
+            event: null,
+            reservedUntil: null,
+            borrowUntil: null
+          }
+        }
       );
     }
 

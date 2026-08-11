@@ -16,6 +16,7 @@
   --success: #1E7A43;
   --success-bg: #E9F5EE;
   --warning-bg: #F5EAD3;
+  --danger-alt: #d85f5a;
 
   --font-display: 'Inter', sans-serif;
   --font-body: 'Nunito Sans', sans-serif;
@@ -77,7 +78,41 @@ select:focus-visible {
   background: var(--bg);
 }
 
+/* Subtle animated grid behind the login card - a faint line pattern that
+   drifts diagonally from the top-right toward the bottom-left, looping
+   seamlessly (the drift distance is an exact multiple of the grid tile size,
+   so the loop point is invisible). position: fixed anchors it to the
+   viewport directly (no positioned-ancestor setup needed on <body>, and no
+   risk of the oversized inset expanding the page's scrollable area / nudging
+   the flex-centered login card off-center - a fixed element never
+   contributes to document scroll size regardless of how far its bounds
+   extend). z-index keeps it behind everything, pointer-events: none keeps it
+   from ever intercepting clicks. */
+.login-body::before {
+  content: '';
+  position: fixed;
+  inset: -400px;
+  background-image:
+    linear-gradient(rgba(37, 54, 62, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 54, 62, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: loginGridDrift 30s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes loginGridDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -400px 400px;
+  }
+}
+
 .login-card {
+  position: relative;
+  z-index: 1;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -86,6 +121,18 @@ select:focus-visible {
   width: 100%;
   max-width: 380px;
   box-shadow: var(--shadow-lg);
+  animation: loginCardSlideIn 1s ease-out both;
+}
+
+@keyframes loginCardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .login-logo {
@@ -236,7 +283,7 @@ select:focus-visible {
   justify-content: space-between;
   background: var(--ink);
   color: #fff;
-  padding: 1rem 1.75rem;
+  padding: 1.5rem 1.75rem;
   border-bottom: 4px solid var(--amber);
   box-shadow: var(--shadow-sm);
   position: sticky;
@@ -252,17 +299,19 @@ select:focus-visible {
 
 .topbar-logo {
   display: block;
-  height: 28px;
+  height: 38px;
   width: auto;
+  position: relative;
+  top: -5px;
 }
 
 .topbar-logo-icon {
-  height: 32px;
-  width: 32px;
+  height: 42px;
+  width: 42px;
 }
 
 .topbar h1 {
-  font-size: 1.15rem;
+  font-size: 1.5rem;
   color: #fff;
 }
 
@@ -295,7 +344,7 @@ select:focus-visible {
   background: var(--bg);
   border-bottom: 1px solid var(--line);
   position: sticky;
-  top: 65px;
+  top: 94px;
   z-index: 100;
 }
 
@@ -309,6 +358,7 @@ select:focus-visible {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--ink-soft);
+  transition: background-color 0.75s ease, color 0.75s ease;
 }
 
 .tab-btn:hover {
@@ -329,7 +379,21 @@ main {
 }
 
 .tab-panel { display: none; }
-.tab-panel.active { display: block; }
+.tab-panel.active {
+  display: block;
+  animation: tabFadeIn 0.25s ease-out both;
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /* ---------- Shared form bits ---------- */
 
@@ -473,6 +537,24 @@ main {
   box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.14);
 }
 
+/* Move the calendar picker icon to the left of the date input (Borrow Until,
+   Reservation Start/End) - it sits on the right by default in Chromium's
+   built-in date control. Extra left padding on the input makes room, and the
+   icon itself is pulled out of normal flow and pinned to that space. */
+.input-row input[type="date"] {
+  position: relative;
+  padding-left: 2.1rem;
+}
+
+.input-row input[type="date"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  cursor: pointer;
+}
+
 button.primary-btn,
 .input-row > button:first-of-type,
 #borrowAddBtn,
@@ -496,8 +578,13 @@ button.primary-btn:hover,
 }
 
 /* ---------- Scan icon button ---------- */
-
-.input-row .scan-btn {
+/* Base look applies wherever a .scan-btn shows up (the Borrow/Return/Reserve
+   tabs' .input-row, and My Items' .home-return-scan-group) - only sizing is
+   overridden per context below. Previously this was scoped to ".input-row
+   .scan-btn", which the My Items version never matched (its container is
+   .home-return-scan-group, not .input-row), leaving that one an unstyled
+   native button with an oversized, uncentered icon inside it. */
+.scan-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -511,13 +598,13 @@ button.primary-btn:hover,
   box-shadow: var(--shadow-sm);
 }
 
-.input-row .scan-btn:hover {
+.scan-btn:hover {
   background: var(--teal-dark);
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
 }
 
-.input-row .scan-btn svg {
+.scan-btn svg {
   width: 20px;
   height: 20px;
   fill: currentColor;
@@ -899,7 +986,7 @@ button.event-list-btn:hover {
    in dashboard.js. There's no email/push layer in this app, so this inline
    row is the notification. */
 .my-items-warning-row td {
-  background: var(--warning-bg);
+  background: var(--danger-alt);
   color: var(--amber-dark);
   font-size: 0.82rem;
   font-weight: 600;

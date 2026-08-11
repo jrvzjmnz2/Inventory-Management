@@ -168,11 +168,6 @@ function setHomeViewingId(targetId) {
   homeViewingId = (isAdmin && targetId && targetId.trim()) || employeeId;
   if (isAdmin) {
     homeViewIdInput.value = homeViewingId === employeeId ? '' : homeViewingId;
-    if (homeViewingId !== employeeId) {
-      setMessage(homeViewingLabel, `Viewing items for "${homeViewingId}". Clear the field and press View to go back to your own.`, null);
-    } else {
-      setMessage(homeViewingLabel, '', null);
-    }
   }
   loadMyItems();
 }
@@ -312,6 +307,19 @@ function pendingReturnWarning(i) {
   return pending;
 }
 
+// Same on-screen-only "notification" idea as pendingReturnWarning above, but
+// for the borrower's own Borrow Until due date/time (set on the Borrow tab
+// when the item was checked out) rather than someone else's reservation.
+// Fires once 12 hours or less remain before the due date/time - also covers
+// the item already being overdue, just worded differently.
+function borrowDueWarning(i) {
+  if (!i.borrowUntil) return null;
+  const dueMs = new Date(i.borrowUntil).getTime();
+  const hoursUntilDue = (dueMs - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilDue > 12) return null;
+  return { due: i.borrowUntil, overdue: hoursUntilDue <= 0 };
+}
+
 function renderMyItemRow(i) {
   // A pending reservation hasn't started yet - the item is still fully
   // Available to everyone else in the meantime, so there's nothing to
@@ -333,7 +341,11 @@ function renderMyItemRow(i) {
   const statusLabel = normalizeStatusLabel(i.status);
   const pillClass = statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
   const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
-  const heldUntil = i.reservedUntil ? formatDateTime(i.reservedUntil) : '-';
+  // Reserved rows show the hold's expiration; borrowed (Unavailable) rows
+  // show the Borrow Until due date/time instead, when one was set.
+  const heldUntil = statusLabel === 'Reserved'
+    ? (i.reservedUntil ? formatDateTime(i.reservedUntil) : '-')
+    : (i.borrowUntil ? formatDateTime(i.borrowUntil) : '-');
 
   let actionsHtml = '';
   if (statusLabel === 'Reserved') {
@@ -363,6 +375,20 @@ function renderMyItemRow(i) {
   }
 
   const warning = statusLabel === 'Unavailable' ? pendingReturnWarning(i) : null;
+  const dueWarning = statusLabel === 'Unavailable' ? borrowDueWarning(i) : null;
+  const warningRows = `${
+    warning
+      ? `<tr class="my-items-warning-row"><td colspan="5">Please return "${escapeHtml(i.item)}" by ${formatDateTime(warning.start)} - it's reserved${warning.event ? ` for "${escapeHtml(warning.event)}"` : ''} starting then.</td></tr>`
+      : ''
+  }${
+    dueWarning
+      ? `<tr class="my-items-warning-row"><td colspan="5">${
+          dueWarning.overdue
+            ? `"${escapeHtml(i.item)}" is past its Borrow Until time. Please return it as soon as possible.`
+            : `Please return "${escapeHtml(i.item)}" soon.`
+        }</td></tr>`
+      : ''
+  }`;
 
   return `
   <tr>
@@ -371,10 +397,7 @@ function renderMyItemRow(i) {
     <td><span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span></td>
     <td>${heldUntil}</td>
     <td class="action-row">${actionsHtml}</td>
-  </tr>${
-    warning
-      ? `<tr class="my-items-warning-row"><td colspan="5">Please return "${escapeHtml(i.item)}" by ${formatDateTime(warning.start)} - it's reserved${warning.event ? ` for "${escapeHtml(warning.event)}"` : ''} starting then.</td></tr>`
-      : ''
+  </tr>${warningRows
   }`;
 }
 
@@ -832,6 +855,18 @@ const borrowStatusMessage = document.getElementById('borrowStatusMessage');
 const purposeSelect = document.getElementById('purposeSelect');
 const eventInput = document.getElementById('eventInput');
 const borrowOnBehalfInput = document.getElementById('borrowOnBehalfInput');
+const borrowUntilDateInput = document.getElementById('borrowUntilDateInput');
+const borrowUntilTimeInput = document.getElementById('borrowUntilTimeInput');
+
+// Picking a date defaults its time to end-of-day (11:59 PM) so a due date can
+// be set with just one date pick - the time field stays fully editable
+// afterward for anyone who wants a precise hour (matches the Reserve tab's
+// date-picker behavior).
+borrowUntilDateInput.addEventListener('change', () => {
+  if (borrowUntilDateInput.value && !borrowUntilTimeInput.value) {
+    borrowUntilTimeInput.value = '23:59';
+  }
+});
 
 // Builds a fixed checklist of miscellaneous items inside `containerEl`: a
 // checkbox plus a +/- quantity stepper per row. The checked rows *are* the
@@ -1024,6 +1059,26 @@ borrowCompleteBtn.addEventListener('click', async () => {
     return;
   }
 
+  // Same timezone-safe pattern as the Reserve tab: build the Date here in the
+  // browser (so the picked date/time means what the employee actually saw)
+  // and send an ISO instant string, rather than letting the server
+  // reconstruct it from separate date/time strings in its own timezone.
+  const borrowUntilDateValue = borrowUntilDateInput.value;
+  const borrowUntilTimeValue = borrowUntilTimeInput.value;
+  if (borrowCart.length > 0 && (!borrowUntilDateValue || !borrowUntilTimeValue)) {
+    setMessage(borrowStatusMessage, 'Select a Borrow Until date/time before completing the borrow.', 'error');
+    return;
+  }
+  let borrowUntilISO = null;
+  if (borrowCart.length > 0) {
+    const borrowUntilCheck = new Date(`${borrowUntilDateValue}T${borrowUntilTimeValue}`);
+    if (borrowUntilCheck.getTime() <= Date.now()) {
+      setMessage(borrowStatusMessage, 'Borrow Until must be a future date/time.', 'error');
+      return;
+    }
+    borrowUntilISO = borrowUntilCheck.toISOString();
+  }
+
   // Admin can borrow on behalf of any employee via the extra ID field that
   // only appears for the Admin account - everyone else always borrows as
   // themselves.
@@ -1052,7 +1107,8 @@ borrowCompleteBtn.addEventListener('click', async () => {
         purpose: purpose || null,
         event: eventValue || null,
         equipmentIds: borrowCart.map((c) => c.equipmentId),
-        miscItems
+        miscItems,
+        borrowUntil: borrowUntilISO
       })
     });
     const data = await res.json();
@@ -1072,14 +1128,13 @@ borrowCompleteBtn.addEventListener('click', async () => {
       return;
     }
 
-    setMessage(borrowStatusMessage, 'Borrow completed. You can now export the Word document.', 'success');
-    borrowCart = [];
-    purposeSelect.value = '';
-    eventInput.value = '';
-    if (isAdmin) borrowOnBehalfInput.value = '';
-    renderBorrowCart();
-    borrowMisc.reset();
-    exportBtn.disabled = false;
+    // Reload straight back to My Items rather than resetting the cart/form
+    // in place - My Items is the tab already marked active in the static
+    // HTML, so a fresh page load lands there on its own. (This does mean
+    // the "Export to Word" button below - only ever enabled right after a
+    // borrow completes in the current page - never gets a chance to turn
+    // on; that's an accepted tradeoff of reloading here.)
+    window.location.reload();
   } catch (err) {
     setMessage(borrowStatusMessage, 'Could not reach the server.', 'error');
   }
@@ -1231,9 +1286,10 @@ returnCompleteBtn.addEventListener('click', async () => {
       return;
     }
 
-    setMessage(returnStatusMessage, 'Return completed successfully.', 'success');
-    returnCart = [];
-    renderReturnCart();
+    // Reload straight back to My Items rather than resetting the cart in
+    // place - My Items is the tab already marked active in the static HTML,
+    // so a fresh page load lands there on its own.
+    window.location.reload();
   } catch (err) {
     setMessage(returnStatusMessage, 'Could not reach the server.', 'error');
   }
@@ -1469,17 +1525,10 @@ reserveCompleteBtn.addEventListener('click', async () => {
       return;
     }
 
-    setMessage(reserveStatusMessage, data.message || 'Reservation completed successfully.', 'success');
-    reserveCart = [];
-    reservePurposeSelect.value = '';
-    reserveEventInput.value = '';
-    reserveStartDateInput.value = '';
-    reserveStartTimeInput.value = '';
-    reserveEndDateInput.value = '';
-    reserveEndTimeInput.value = '';
-    if (isAdmin) reserveOnBehalfInput.value = '';
-    renderReserveCart();
-    reserveMisc.reset();
+    // Reload straight back to My Items rather than resetting the cart/form
+    // in place - My Items is the tab already marked active in the static
+    // HTML, so a fresh page load lands there on its own.
+    window.location.reload();
   } catch (err) {
     setMessage(reserveStatusMessage, 'Could not reach the server.', 'error');
   }
@@ -1809,7 +1858,7 @@ function applyInventoryFilters() {
     const lastBorrowedDateText = formatDateTime(i.lastBorrowedAt);
 
     return (
-      textMatches(i.location, inventoryFilters.location) &&
+      textMatches(i.equipmentId, inventoryFilters.equipmentId) &&
       textMatches(i.item, inventoryFilters.item) &&
       // Case-insensitive: some existing inventory rows have status stored
       // in uppercase (AVAILABLE/UNAVAILABLE/RESERVED) while the app's own
@@ -1870,15 +1919,9 @@ function renderInventoryRows(items) {
       // Admin gets every cell as an editable control; everyone else keeps
       // the existing read-only display (Comment/Additional Info stay
       // editable for all users, unchanged).
-      // The Equipment ID itself isn't shown here anymore - Location takes
-      // its place as the lead column, since browsing inventory by physical
-      // location is more useful than by ID (the ID lives on the item's own
-      // barcode, scanned directly at Borrow/Return/Reserve time). The ID is
-      // only ever surfaced to Admin, as a hover tooltip on this cell -
-      // everyone else sees Location alone, no ID anywhere, not even on hover.
-      const locationCell = isAdmin
-        ? adminField(i.equipmentId, 'location', i.location, 'Location', `Equipment ID: ${i.equipmentId}`)
-        : `<span class="tag-chip">${escapeHtml(i.location) || '-'}</span>`;
+      // Equipment ID is the lead column here - it's the item's own barcode
+      // value, visible to every user (not just Admin).
+      const equipmentIdCell = `<span class="tag-chip">${escapeHtml(i.equipmentId) || '-'}</span>`;
       const itemCell = isAdmin ? adminField(i.equipmentId, 'item', i.item) : escapeHtml(i.item);
       // A reservation hold (reservedUntil) can be active while the item is
       // physically checked out (status Unavailable, from the reserving
@@ -1928,7 +1971,7 @@ function renderInventoryRows(items) {
 
       return `
       <tr>
-        <td>${locationCell}</td>
+        <td>${equipmentIdCell}</td>
         <td>${itemCell}</td>
         <td>${statusCell}</td>
         <td>
