@@ -31,7 +31,15 @@ function setSessionCookie(res, employee) {
 }
 
 function clearSessionCookie(res) {
-  res.clearCookie(SESSION_COOKIE);
+  // Must match the options passed to res.cookie() above (minus
+  // expires/maxAge) - Express only recognizes it as the same cookie,
+  // and actually clears it in the browser, if these line up.
+  res.clearCookie(SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
 }
 
 // Reads and verifies the cookie, returns the {employeeId, name} payload or
