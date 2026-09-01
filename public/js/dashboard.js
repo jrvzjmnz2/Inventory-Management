@@ -1,9 +1,15 @@
 // ---------- Auth guard ----------
-const employeeId = sessionStorage.getItem('employeeId');
-const employeeName = sessionStorage.getItem('employeeName');
+// The server only ever sends this page to a browser that already presented
+// a valid session cookie (see requirePageSession in server.js) and embeds
+// that verified identity as window.__SESSION__ right before this script
+// tag. Reading it here (instead of a client-writable store like
+// sessionStorage) means this can't be spoofed by editing browser storage -
+// the real gate already ran server-side before any of this HTML was sent.
+const employeeId = window.__SESSION__ && window.__SESSION__.employeeId;
+const employeeName = window.__SESSION__ && window.__SESSION__.name;
 
 if (!employeeId) {
-  window.location.href = 'index.html';
+  window.location.href = '/';
 }
 
 document.getElementById('welcomeText').textContent = `${employeeName} (${employeeId})`;
@@ -20,10 +26,14 @@ if (isAdmin) {
   document.querySelectorAll('.admin-only').forEach((el) => el.classList.remove('hidden'));
 }
 
-document.getElementById('logoutBtn').addEventListener('click', () => {
-  sessionStorage.removeItem('employeeId');
-  sessionStorage.removeItem('employeeName');
-  window.location.href = 'index.html';
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch {
+    // Even if the request fails, sending the browser to '/' still forces
+    // a fresh session check server-side on the next load.
+  }
+  window.location.href = '/';
 });
 
 // ---------- Small helpers ----------

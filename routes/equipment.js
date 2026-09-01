@@ -79,11 +79,12 @@ async function autoExpireReservation(equipmentCollection, item) {
 const router = express.Router();
 
 // Gate for the admin-only endpoints below (generic field edit, CSV import).
-// Matches the rest of this app's trust model - there's no session/JWT layer
-// anywhere, every route trusts whatever employeeId the client sends - so
-// this is a consistency check, not a hardened auth boundary.
+// req.employee is set by the requireSession middleware server.js mounts in
+// front of this whole router, so this checks the actual verified session -
+// not a client-supplied field, which used to be spoofable by anyone calling
+// the API directly.
 function requireAdmin(req, res, next) {
-  if (req.body.requesterId !== ADMIN_EMPLOYEE_ID) {
+  if (!req.employee || req.employee.employeeId !== ADMIN_EMPLOYEE_ID) {
     return res.status(403).json({ message: 'Only the Admin account can do this.' });
   }
   next();

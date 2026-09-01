@@ -5,7 +5,9 @@ tracking office equipment: who has what, borrowing, and returning.
 
 ## Features
 
-- **Login page** — employees sign in (and can self-register) before doing anything else.
+- **Login page** — sign-in now happens at the AI Hub, not here (see "Single sign-on
+  with the AI Hub" below). This app still has its own `/api/auth/register` endpoint
+  for creating new employee accounts, at `public/register.html`.
 - **Borrow tab** — type an Equipment ID to add it to a cart. Items already borrowed by
   someone else are rejected with the current borrower's name shown, so you can pick
   another item. Below the equipment cart, a **Miscellaneous Items** checklist lists all
@@ -141,13 +143,34 @@ Password:    password123
 in the target database, so it can't accidentally wipe real data — pass
 `--force` (`npm run seed -- --force`) if you genuinely want to reset it.
 
+## Single sign-on with the AI Hub
+
+Employees now sign in once, at the AI Hub, not here. This app's role is to accept a
+one-time hand-off token from the Hub and turn it into its own session cookie - see
+`/sso` in `server.js` and `middleware/auth.js`.
+
+Add these to `.env` (already present if you copied `.env.example` after this change):
+
+| Variable            | What it's for                                                            |
+|---------------------|----------------------------------------------------------------------------|
+| `SSO_SHARED_SECRET`  | Must be **identical** to the AI Hub's own `SSO_SHARED_SECRET`.             |
+| `SESSION_SECRET`     | Random value, signs this app's own login cookie. Not shared with the Hub.  |
+| `HUB_URL`            | Where the Hub is reachable - `http://localhost:5173` in dev.               |
+
+With both apps running locally and those secrets matching, opening this app directly
+(no session yet) should redirect to the Hub's login screen; clicking its tile on the Hub
+after logging in there should land straight on `/dashboard.html`, skipping any local login
+form. The AI Hub's own README has a step-by-step checklist for testing the whole flow.
+
 ## Running
 
 ```bash
 npm start
 ```
 
-Then open **http://localhost:3000** in your browser. You'll land on the login page first.
+Then open **http://localhost:3000** in your browser. Without a session you'll be sent
+to the AI Hub's login screen (`HUB_URL` in `.env`) rather than a local login page - see
+"Single sign-on with the AI Hub" below.
 
 For development with auto-restart on file changes:
 
@@ -217,6 +240,14 @@ Export bundles two things for the logged-in employee into a single `.docx`:
 
 ## Security note
 
-This is built for a trusted internal office tool. Passwords are hashed with
-bcrypt, but there's no session/token expiry, HTTPS, or rate limiting — add those
-if you plan to expose this beyond a local network.
+This is built for a trusted internal office tool. Passwords are hashed with bcrypt.
+Every API route except `/api/auth/*` now requires a valid session cookie
+(`middleware/auth.js`), issued either by logging in through the AI Hub or by the
+`/sso` hand-off route - previously these routes trusted whatever `employeeId` the
+request body claimed, which anyone calling the API directly could fake. The one
+exception still worth knowing about: borrow/reserve/return still accept a target
+`employeeId` in the request body for the Admin "acting on behalf of" feature - only
+the *admin* privilege check itself (`routes/equipment.js`'s `requireAdmin`) was
+switched to trust the verified session instead of the request body. There's still
+no rate limiting - add that if this is ever exposed beyond employees on a trusted
+network.

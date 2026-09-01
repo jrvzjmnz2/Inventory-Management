@@ -3,28 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Log In · Equipment Inventory</title>
+  <title>Register · Equipment Inventory</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="login-body">
   <div class="login-card">
     <img class="login-logo" src="assets/logos/full-logo-color.png" alt="ITEMHOUND">
     <h1>Equipment Inventory</h1>
-    <p class="subtitle">Employee Sign-In</p>
+    <p class="subtitle">New Employee Registration</p>
 
-    <form id="loginForm">
-      <label for="employeeId">Employee ID</label>
-      <input type="text" id="employeeId" autocomplete="username" required>
-
-      <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password" required>
-
-      <button type="submit">Log In</button>
-      <p id="loginError" class="error-text"></p>
-    </form>
-    <button id="showRegister" type="button" class="link-btn">New employee? Register here</button>
-
-    <form id="registerForm" class="hidden">
+    <form id="registerForm">
       <label for="regId">Employee ID</label>
       <input type="text" id="regId" required>
 
@@ -41,10 +29,9 @@
       <p id="registerError" class="error-text"></p>
       <p id="registerSuccess" class="success-text"></p>
     </form>
-    <button id="showLogin" type="button" class="link-btn hidden">Back to login</button>
+    <p class="subtitle">Already registered? Sign in from the AI Hub.</p>
   </div>
 
-  <!-- ============ REGISTRATION SUCCESS POPUP ============ -->
   <div id="registerSuccessPopup" class="success-popup hidden">
     <div class="success-popup-card">
       <div class="success-popup-icon">✓</div>
@@ -52,6 +39,6 @@
     </div>
   </div>
 
-  <script src="js/login.js"></script>
+  <script src="js/register.js"></script>
 </body>
 </html>
