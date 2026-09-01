@@ -26,14 +26,13 @@ if (isAdmin) {
   document.querySelectorAll('.admin-only').forEach((el) => el.classList.remove('hidden'));
 }
 
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch {
-    // Even if the request fails, sending the browser to '/' still forces
-    // a fresh session check server-side on the next load.
-  }
-  window.location.href = '/';
+// This used to log the employee out of this app entirely. Now it's just a
+// way back to the Hub - it leaves this app's own session alone, so if the
+// same person opens Equipment Inventory again later today (directly, or by
+// clicking its tile on the Hub), they land straight back on this dashboard
+// rather than having to sign in again.
+document.getElementById('returnToHubBtn').addEventListener('click', () => {
+  window.location.href = window.__HUB_URL__ || '/';
 });
 
 // ---------- Small helpers ----------

@@ -56,7 +56,7 @@ app.get('/dashboard.html', requirePageSession, requireLiveEmployee, (req, res) =
   const filePath = path.join(__dirname, 'public', 'dashboard.html');
   fs.readFile(filePath, 'utf8', (err, html) => {
     if (err) return res.status(500).send('Could not load the dashboard.');
-    const sessionScript = `<script>window.__SESSION__ = ${JSON.stringify(req.employee)};</script>`;
+    const sessionScript = `<script>window.__SESSION__ = ${JSON.stringify(req.employee)}; window.__HUB_URL__ = ${JSON.stringify(HUB_URL)};</script>`;
     res.type('html').send(html.replace('<!--__SESSION_JSON__-->', sessionScript));
   });
 });
