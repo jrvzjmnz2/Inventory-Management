@@ -96,6 +96,25 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Part of the Hub's "log out everywhere" chain (see its own
+// /api/auth/logout-chain) - a plain GET so it can be reached by a real
+// top-level browser navigation rather than a background request, which is
+// what actually lets this clear its own cookie reliably (a cross-site
+// fetch from the Hub's origin would run into third-party-cookie blocking
+// and this cookie's own SameSite=Lax, regardless of CORS). Unauthenticated
+// on purpose - clearing a cookie that may not even be there is harmless -
+// but that also makes `returnTo` a route anyone could call, so it's only
+// ever honored when it points back at the Hub we're configured to trust,
+// never at whatever address a link happened to supply.
+app.get('/logout', (req, res) => {
+  clearSessionCookie(res);
+  const returnTo = req.query.returnTo;
+  if (typeof returnTo === 'string' && returnTo.startsWith(HUB_URL)) {
+    return res.redirect(returnTo);
+  }
+  res.redirect(HUB_URL);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 connectToDatabase()

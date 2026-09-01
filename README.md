@@ -162,6 +162,23 @@ With both apps running locally and those secrets matching, opening this app dire
 after logging in there should land straight on `/dashboard.html`, skipping any local login
 form. The AI Hub's own README has a step-by-step checklist for testing the whole flow.
 
+### Logging out everywhere
+
+Logging out at the Hub also logs out of this app - `GET /logout` is this app's half of
+that: it clears this app's own session cookie, then redirects on to whatever `returnTo`
+the Hub's logout chain gave it (validated to make sure it actually points back at the
+configured `HUB_URL`, since this route takes no session to call). It's a plain page
+redirect rather than a background request on purpose - a fetch from the Hub's own domain
+can't reliably clear this app's cookie across domains once third-party cookie blocking is
+in play, no matter how CORS is configured, but a real top-level navigation to this app's
+own domain doesn't run into that at all.
+
+The dashboard's own **Return to Hub** button is unrelated and does *not* log out - it's
+just a link back, so returning here later in the same session doesn't ask for a password
+again. If a second SSO-enabled tool is ever added on the Hub side, giving it this same
+`GET /logout?returnTo=...` contract (clear its own cookie, validate returnTo, redirect) is
+all that's needed for the Hub to include it in the same logout chain automatically.
+
 ## Running
 
 ```bash
