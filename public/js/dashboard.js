@@ -24,9 +24,8 @@ if (!employeeId) {
   document.getElementById('pendingSetupBanner').classList.remove('hidden');
 }
 
-document.getElementById('welcomeText').textContent = employeeId
-  ? `${employeeName} (${employeeId})`
-  : `${employeeName} (pending setup)`;
+document.getElementById('welcomeName').textContent = employeeName;
+document.getElementById('welcomeId').textContent = employeeId || 'pending setup';
 
 // ---------- Admin mode ----------
 // The "Admin" employeeId unlocks a few extra powers on this page: editing
@@ -59,10 +58,13 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// Renders into one of the inline alert bars. The type class is what makes
+// it visible at all (see .message in style.css), so a message with no type
+// is the same as clearing it.
 function setMessage(el, text, type) {
   el.textContent = text || '';
-  el.classList.remove('error', 'success');
-  if (type) el.classList.add(type);
+  el.classList.remove('error', 'success', 'info');
+  if (text && type) el.classList.add(type);
 }
 
 // The raw Equipment ID is only ever shown to the Admin account in the
@@ -73,12 +75,6 @@ function setMessage(el, text, type) {
 // intact either way).
 function idCell(equipmentId) {
   return isAdmin ? `<td><span class="tag-chip">${escapeHtml(equipmentId)}</span></td>` : '<td class="hidden"></td>';
-}
-
-// My Items shows the raw Equipment ID to everyone, admin or not - unlike
-// idCell() above.
-function homeIdCell(equipmentId) {
-  return `<td><span class="tag-chip">${escapeHtml(equipmentId)}</span></td>`;
 }
 
 // Same idea for the " (EQ001)" suffix that used to tag along on Borrow/
@@ -108,6 +104,57 @@ const CANONICAL_STATUSES = ['Available', 'Unavailable', 'Reserved'];
 function normalizeStatusLabel(status) {
   const match = CANONICAL_STATUSES.find((s) => s.toUpperCase() === String(status || '').toUpperCase());
   return match || status || '';
+}
+
+// ---------- Toasts ----------
+// For feedback that would otherwise be wiped by the reload following it -
+// an inventory field save re-renders the whole grid, taking any inline
+// "Saved." message with it. Inline .message elements stay for validation
+// that belongs next to the field it's about.
+const toastStack = document.getElementById('toastStack');
+
+function showToast(text, type) {
+  const el = document.createElement('div');
+  el.className = `toast${type ? ` toast-${type}` : ''}`;
+  el.innerHTML = `<span class="toast-dot"></span><span></span>`;
+  el.lastElementChild.textContent = text;
+  toastStack.appendChild(el);
+
+  const dismiss = () => {
+    el.classList.add('is-leaving');
+    // Falls back to a plain remove if the animation never fires (reduced
+    // motion shortens it to ~0ms, and a backgrounded tab may skip it).
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 600);
+  };
+
+  setTimeout(dismiss, 3200);
+  el.addEventListener('click', dismiss);
+}
+
+// ---------- Small UI motion helpers ----------
+// Counts a summary tile up to its value instead of snapping, which makes a
+// changed number noticeable after a refresh. Honors reduced motion.
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function animateCount(el, to) {
+  if (prefersReducedMotion.matches || to === 0) {
+    el.textContent = String(to);
+    return;
+  }
+  const duration = 460;
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    // ease-out so it decelerates into the final number
+    el.textContent = String(Math.round(to * (1 - Math.pow(1 - t, 3))));
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function skeletonBlocks(count, className) {
+  return Array.from({ length: count }, () => `<div class="skeleton ${className}"></div>`).join('');
 }
 
 // ---------- Shared confirmation modal ----------
@@ -142,6 +189,23 @@ confirmCancelBtn.addEventListener('click', () => settleConfirm(false));
 // ---------- Tab switching ----------
 const tabButtons = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
+const tabIndicator = document.getElementById('tabIndicator');
+
+// One underline that slides between tabs, rather than a border toggled on
+// each. Measured from the active button so it tracks label width, and
+// re-measured on resize/font load since both change that width.
+function positionTabIndicator(animate) {
+  const active = document.querySelector('.tab-btn.active');
+  if (!active) return;
+  if (!animate) tabIndicator.classList.add('no-anim');
+  tabIndicator.style.width = `${active.offsetWidth}px`;
+  tabIndicator.style.transform = `translateX(${active.offsetLeft}px)`;
+  if (!animate) {
+    // Force a reflow so the jump above isn't animated, then re-enable.
+    void tabIndicator.offsetWidth;
+    tabIndicator.classList.remove('no-anim');
+  }
+}
 
 tabButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -149,6 +213,7 @@ tabButtons.forEach((btn) => {
     tabPanels.forEach((p) => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById(btn.dataset.tab).classList.add('active');
+    positionTabIndicator(true);
 
     if (btn.dataset.tab === 'inventory') {
       loadInventory();
@@ -166,18 +231,46 @@ tabButtons.forEach((btn) => {
   });
 });
 
+// The tab bar sticks directly under the topbar, whose height changes with
+// the viewport (it stacks on narrow screens) and with the brand font
+// loading. Measuring it beats hardcoding an offset that would leave content
+// peeking through the gap.
+function syncStickyOffsets() {
+  const topbar = document.querySelector('.topbar');
+  const isStuck = getComputedStyle(topbar).position === 'sticky';
+  document.documentElement.style.setProperty('--topbar-h', isStuck ? `${topbar.offsetHeight}px` : '0px');
+}
+
+function refreshChrome() {
+  syncStickyOffsets();
+  positionTabIndicator(false);
+}
+
+window.addEventListener('resize', refreshChrome);
+refreshChrome();
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(refreshChrome);
+}
+
 // =======================================================
 // MY ITEMS (HOME) TAB
 // =======================================================
 // Shows only the logged-in employee's own equipment that's currently
 // Reserved (held, on the shelf) or Unavailable (checked out) - anything
 // fully Available isn't "theirs" to act on, so it's left off this view.
-const homeBody = document.getElementById('homeBody');
+//
+// Laid out as one card per event rather than one long table: an event is
+// the unit people actually think and act in (borrow all of it, reschedule
+// all of it, export a list for it), and the bulk actions live on the card
+// header where they apply. A row of summary tiles above answers "is
+// anything on fire?" before any card is read.
+const homeStats = document.getElementById('homeStats');
+const homeEvents = document.getElementById('homeEvents');
 const homeMessage = document.getElementById('homeMessage');
 const homeViewIdInput = document.getElementById('homeViewIdInput');
 const homeViewIdBtn = document.getElementById('homeViewIdBtn');
 const homeViewingLabel = document.getElementById('homeViewingLabel');
-document.getElementById('refreshHomeBtn').addEventListener('click', loadMyItems);
+document.getElementById('refreshHomeBtn').addEventListener('click', () => loadMyItems());
 
 // Admin can look up any employee's ID here to see (and act on) their My
 // Items list instead of just their own - everyone else always sees their own
@@ -203,13 +296,15 @@ if (isAdmin) {
 }
 
 async function loadMyItems() {
-  homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Loading items…</td></tr>';
+  homeStats.innerHTML = skeletonBlocks(4, 'skeleton-tile');
+  homeEvents.innerHTML = skeletonBlocks(2, 'skeleton-card');
   setMessage(homeMessage, '', null);
   try {
     const res = await fetch('/api/equipment');
     const items = await res.json();
     if (!res.ok) {
-      homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not load items.</td></tr>';
+      homeStats.innerHTML = '';
+      homeEvents.innerHTML = emptyStateHtml('Could not load items', 'The server responded with an error. Try Refresh in a moment.');
       return;
     }
 
@@ -233,9 +328,17 @@ async function loadMyItems() {
       )
       .map((i) => ({ ...i, isPending: true, event: i.pendingReservation.event }));
 
+    if (isAdmin) {
+      homeViewingLabel.textContent =
+        homeViewingId === employeeId
+          ? 'Everything you currently have reserved or checked out.'
+          : `Viewing the items held by "${homeViewingId}".`;
+    }
+
     renderMyItems([...myPending, ...mine]);
   } catch (err) {
-    homeBody.innerHTML = '<tr class="empty-row"><td colspan="5">Could not reach the server.</td></tr>';
+    homeStats.innerHTML = '';
+    homeEvents.innerHTML = emptyStateHtml('Could not reach the server', 'Check your connection, then try Refresh.');
   }
 }
 
@@ -254,6 +357,15 @@ function groupItemsByEvent(items) {
     if (b === 'No Event') return -1;
     return a.localeCompare(b);
   });
+}
+
+function emptyStateHtml(title, body) {
+  return `
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm0 12H4V8h16v10z"/></svg>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(body)}</p>
+    </div>`;
 }
 
 const SCAN_ICON_SVG =
@@ -328,10 +440,9 @@ function pendingReturnWarning(i) {
 }
 
 // Same on-screen-only "notification" idea as pendingReturnWarning above, but
-// for the borrower's own Borrow Until due date/time (set on the Borrow tab
-// when the item was checked out) rather than someone else's reservation.
-// Fires once 12 hours or less remain before the due date/time - also covers
-// the item already being overdue, just worded differently.
+// for the borrower's own Borrow Until due date/time rather than someone
+// else's reservation. Fires once 12 hours or less remain - also covers the
+// item already being overdue, just worded differently.
 function borrowDueWarning(i) {
   if (!i.borrowUntil) return null;
   const dueMs = new Date(i.borrowUntil).getTime();
@@ -340,102 +451,182 @@ function borrowDueWarning(i) {
   return { due: i.borrowUntil, overdue: hoursUntilDue <= 0 };
 }
 
-function renderMyItemRow(i) {
-  // A pending reservation hasn't started yet - the item is still fully
-  // Available to everyone else in the meantime, so there's nothing to
-  // borrow/return/end here, just the option to cancel it before it starts.
-  if (i.isPending) {
-    const pending = i.pendingReservation;
-    return `
-    <tr>
-      ${homeIdCell(i.equipmentId)}
-      <td>${escapeHtml(i.item)}</td>
-      <td><span class="status-pill status-upcoming">Upcoming</span></td>
-      <td>${formatDateTime(pending.start)} &rarr; ${formatDateTime(pending.end)}</td>
-      <td class="action-row">
-        <button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel Reservation</button>
-      </td>
-    </tr>`;
+// True if this row needs the employee to do something soon - drives both the
+// "Needs attention" tile and the urgent spine on the event card it sits in.
+function itemNeedsAttention(i) {
+  if (i.isPending) return false;
+  if (normalizeStatusLabel(i.status) !== 'Unavailable') return false;
+  return Boolean(borrowDueWarning(i) || pendingReturnWarning(i));
+}
+
+function itemIsOverdue(i) {
+  const due = i.isPending ? null : borrowDueWarning(i);
+  return Boolean(due && due.overdue);
+}
+
+// ---------- Summary tiles ----------
+
+function renderHomeStats(items) {
+  const checkedOut = items.filter((i) => !i.isPending && normalizeStatusLabel(i.status) === 'Unavailable').length;
+  const onHold = items.filter((i) => !i.isPending && normalizeStatusLabel(i.status) === 'Reserved').length;
+  const upcoming = items.filter((i) => i.isPending).length;
+  const attention = items.filter(itemNeedsAttention).length;
+  const overdue = items.filter(itemIsOverdue).length;
+
+  const tiles = [
+    { key: 'out', value: checkedOut, label: 'Checked out', hint: 'In your hands right now' },
+    { key: 'reserved', value: onHold, label: 'On hold', hint: 'Reserved, not picked up' },
+    { key: 'upcoming', value: upcoming, label: 'Upcoming', hint: 'Reservations not started' },
+    {
+      key: 'due',
+      value: attention,
+      label: 'Needs attention',
+      hint: overdue ? `${overdue} overdue` : attention ? 'Due back soon' : 'Nothing due soon'
+    }
+  ];
+
+  homeStats.innerHTML = tiles
+    .map(
+      (t, idx) => `
+      <div class="stat-tile stat-tile-${t.key}" style="--i:${idx}">
+        <span class="stat-value" data-count="${t.value}">0</span>
+        <span class="stat-label">${escapeHtml(t.label)}</span>
+        <span class="stat-hint">${escapeHtml(t.hint)}</span>
+      </div>`
+    )
+    .join('');
+
+  homeStats.querySelectorAll('.stat-value').forEach((el) => {
+    animateCount(el, Number(el.dataset.count));
+  });
+}
+
+// ---------- Event cards ----------
+
+// One line describing when this event's equipment is due or held, built from
+// whichever dates its items actually carry (a borrow has borrowUntil, an
+// active hold has reservedUntil, a pending one has both ends of its window).
+function eventScheduleLabel(groupItems) {
+  const pending = groupItems.filter((i) => i.isPending);
+  if (pending.length === groupItems.length && pending.length > 0) {
+    const start = pending.reduce((min, i) => Math.min(min, new Date(i.pendingReservation.start).getTime()), Infinity);
+    const end = pending.reduce((max, i) => Math.max(max, new Date(i.pendingReservation.end).getTime()), 0);
+    return `${formatDateTime(start)} → ${formatDateTime(end)}`;
   }
 
-  const statusLabel = normalizeStatusLabel(i.status);
-  const pillClass = statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
-  const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
-  // Reserved rows show the hold's expiration; borrowed (Unavailable) rows
-  // show the Borrow Until due date/time instead, when one was set.
-  const heldUntil = statusLabel === 'Reserved'
-    ? (i.reservedUntil ? formatDateTime(i.reservedUntil) : '-')
-    : (i.borrowUntil ? formatDateTime(i.borrowUntil) : '-');
+  const dueTimes = groupItems
+    .filter((i) => !i.isPending && i.borrowUntil)
+    .map((i) => new Date(i.borrowUntil).getTime());
+  if (dueTimes.length > 0) return `Due ${formatDateTime(Math.min(...dueTimes))}`;
 
+  const holdTimes = groupItems
+    .filter((i) => !i.isPending && i.reservedUntil)
+    .map((i) => new Date(i.reservedUntil).getTime());
+  if (holdTimes.length > 0) return `Held until ${formatDateTime(Math.max(...holdTimes))}`;
+
+  return 'No end date set';
+}
+
+function myItemRowHtml(i, idx) {
+  const warning = i.isPending ? null : pendingReturnWarning(i);
+  const dueWarning = i.isPending ? null : borrowDueWarning(i);
+
+  let statusPill;
+  let schedule;
   let actionsHtml = '';
-  if (statusLabel === 'Reserved') {
-    actionsHtml = `
-      <button class="secondary-btn home-borrow-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Borrow Now</button>
-      <button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel Reservation</button>`;
-  } else if (statusLabel === 'Unavailable') {
-    // Returning here is barcode-verified, same principle as the Return tab:
-    // scan with the camera, or with a physical (keyboard-emulating) barcode
-    // scanner - either way the scanned code must match this exact item
-    // before it's actually returned. No one-click "just return it" button -
-    // except for Admin looking at someone else's list, who won't have the
-    // physical item on hand to scan in the first place, so a direct button
-    // is offered there instead.
-    const adminViewingOther = isAdmin && homeViewingId !== employeeId;
-    actionsHtml = `
-      ${
-        adminViewingOther
-          ? `<button class="secondary-btn home-admin-return-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Return</button>`
-          : ''
-      }
-      <div class="home-return-scan-group" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}">
-        <input type="text" class="comment-input home-return-scan-input" placeholder="Scan barcode to return">
-        <button class="scan-btn home-scan-camera-btn" type="button" aria-label="Scan with camera to return" title="Scan with camera to return">${SCAN_ICON_SVG}</button>
-      </div>
-      ${reservationActive ? `<button class="remove-btn home-end-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">End Reservation</button>` : ''}`;
+
+  if (i.isPending) {
+    // A pending reservation hasn't started yet - the item is still fully
+    // Available to everyone else in the meantime, so there's nothing to
+    // borrow or return here, just the option to cancel it before it starts.
+    const pending = i.pendingReservation;
+    statusPill = '<span class="status-pill status-upcoming">Upcoming</span>';
+    schedule = `${formatDateTime(pending.start)} → ${formatDateTime(pending.end)}`;
+    actionsHtml = `<button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel Reservation</button>`;
+  } else {
+    const statusLabel = normalizeStatusLabel(i.status);
+    const pillClass = statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
+    statusPill = `<span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>`;
+    const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
+
+    if (statusLabel === 'Reserved') {
+      schedule = i.reservedUntil ? `Held until ${formatDateTime(i.reservedUntil)}` : 'No end date';
+      actionsHtml = `
+        <button class="secondary-btn home-borrow-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Borrow Now</button>
+        <button class="remove-btn home-cancel-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Cancel</button>`;
+    } else {
+      schedule = i.borrowUntil ? `Due ${formatDateTime(i.borrowUntil)}` : 'No due date';
+      // Returning here is barcode-verified, same principle as the Return
+      // tab: scan with the camera, or with a physical (keyboard-emulating)
+      // scanner - either way the scanned code must match this exact item
+      // before it's actually returned. No one-click "just return it" button
+      // - except for Admin looking at someone else's list, who won't have
+      // the physical item on hand to scan in the first place.
+      const adminViewingOther = isAdmin && homeViewingId !== employeeId;
+      actionsHtml = `
+        ${
+          adminViewingOther
+            ? `<button class="secondary-btn home-admin-return-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">Return</button>`
+            : ''
+        }
+        <div class="home-return-scan-group" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}">
+          <input type="text" class="comment-input home-return-scan-input" placeholder="Scan to return">
+          <button class="scan-btn home-scan-camera-btn" type="button" aria-label="Scan with camera to return" title="Scan with camera to return">${SCAN_ICON_SVG}</button>
+        </div>
+        ${reservationActive ? `<button class="remove-btn home-end-btn" data-equipment-id="${escapeHtml(i.equipmentId)}" data-item="${escapeHtml(i.item)}" type="button">End Hold</button>` : ''}`;
+    }
   }
 
-  const warning = statusLabel === 'Unavailable' ? pendingReturnWarning(i) : null;
-  const dueWarning = statusLabel === 'Unavailable' ? borrowDueWarning(i) : null;
-  const warningRows = `${
+  const warnings = `${
     warning
-      ? `<tr class="my-items-warning-row"><td colspan="5">Please return "${escapeHtml(i.item)}" by ${formatDateTime(warning.start)} - it's reserved${warning.event ? ` for "${escapeHtml(warning.event)}"` : ''} starting then.</td></tr>`
+      ? `<span class="ei-warning">Return "${escapeHtml(i.item)}" by ${formatDateTime(warning.start)} — it's reserved${warning.event ? ` for "${escapeHtml(warning.event)}"` : ''} starting then.</span>`
       : ''
   }${
     dueWarning
-      ? `<tr class="my-items-warning-row"><td colspan="5">${
+      ? `<span class="ei-warning${dueWarning.overdue ? ' is-overdue' : ''}">${
           dueWarning.overdue
-            ? `"${escapeHtml(i.item)}" is past its Borrow Until time. Please return it as soon as possible.`
-            : `Please return "${escapeHtml(i.item)}" soon.`
-        }</td></tr>`
+            ? `"${escapeHtml(i.item)}" is past its due time. Please return it as soon as possible.`
+            : `"${escapeHtml(i.item)}" is due back soon.`
+        }</span>`
       : ''
   }`;
 
   return `
-  <tr>
-    ${homeIdCell(i.equipmentId)}
-    <td>${escapeHtml(i.item)}</td>
-    <td><span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span></td>
-    <td>${heldUntil}</td>
-    <td class="action-row">${actionsHtml}</td>
-  </tr>${warningRows
-  }`;
+    <div class="ei-row" style="--i:${idx}">
+      <span class="tag-chip">${escapeHtml(i.equipmentId)}</span>
+      <span class="ei-main">
+        <span class="ei-name">${escapeHtml(i.item)}</span>
+        ${statusPill}
+        <span class="ei-sched">${escapeHtml(schedule)}</span>
+      </span>
+      <span class="ei-actions">${actionsHtml}</span>
+      ${warnings}
+    </div>`;
 }
 
 function renderMyItems(items) {
+  renderHomeStats(items);
+
   if (items.length === 0) {
-    const who = homeViewingId === employeeId ? 'You don\'t' : `"${escapeHtml(homeViewingId)}" doesn't`;
-    homeBody.innerHTML = `<tr class="empty-row"><td colspan="5">${who} have any equipment reserved or checked out right now.</td></tr>`;
+    const who = homeViewingId === employeeId ? 'You have' : `"${homeViewingId}" has`;
+    homeEvents.innerHTML = emptyStateHtml(
+      'Nothing checked out',
+      `${who} no equipment reserved or checked out right now. Head to Borrow / Reserve to set up an event.`
+    );
     return;
   }
 
   const groups = groupItemsByEvent(items);
-  homeBody.innerHTML = groups
-    .map(([eventName, groupItems]) => {
+
+  homeEvents.innerHTML = groups
+    .map(([eventName, groupItems], groupIdx) => {
       // Pending (not-yet-started) items don't count towards either of
       // these - there's nothing to borrow or reschedule on them yet, just
       // the Cancel option already offered on their own row.
       const activeItems = groupItems.filter((i) => !i.isPending);
       const reservedItems = activeItems.filter((i) => normalizeStatusLabel(i.status) === 'Reserved');
+      const checkedOutItems = activeItems.filter((i) => normalizeStatusLabel(i.status) === 'Unavailable');
+      const pendingItems = groupItems.filter((i) => i.isPending);
       const hasReservedToBorrow = reservedItems.length > 0;
       // "All reserved" = every active item in this event is still sitting
       // on the shelf, on-hold but never picked up - none checked out yet.
@@ -452,7 +643,7 @@ function renderMyItems(items) {
       // Anything with a reservation left to cancel/end: still pending
       // (not started), sitting Reserved on the shelf, or checked out but
       // still under an active hold - matches exactly what gets an
-      // individual Cancel/End Reservation button on its own row below.
+      // individual Cancel/End button on its own row.
       const cancellableItems = groupItems.filter((i) => {
         if (i.isPending) return true;
         const statusLabel = normalizeStatusLabel(i.status);
@@ -462,12 +653,45 @@ function renderMyItems(items) {
         }
         return false;
       });
-      const hasCancellable = cancellableItems.length > 0;
       const cancellableIdsAttr = cancellableItems.map((i) => i.equipmentId).join(',');
 
-      return `<tr class="event-section-header">
-          <td colspan="4">${escapeHtml(eventName)}</td>
-          <td class="action-row">
+      const attentionCount = groupItems.filter(itemNeedsAttention).length;
+      const overdueCount = groupItems.filter(itemIsOverdue).length;
+      // The event type was stored on every item in the request, so any one
+      // of them carries it.
+      const eventType = (groupItems.find((i) => i.purpose) || {}).purpose;
+      const checkedOutShare = activeItems.length
+        ? Math.round((checkedOutItems.length / activeItems.length) * 100)
+        : 0;
+
+      const counts = [
+        checkedOutItems.length ? `${checkedOutItems.length} checked out` : '',
+        reservedItems.length ? `${reservedItems.length} on hold` : '',
+        pendingItems.length ? `${pendingItems.length} upcoming` : ''
+      ].filter(Boolean);
+
+      const urgencyChip = overdueCount
+        ? `<span class="chip chip-danger">${overdueCount} overdue</span>`
+        : attentionCount
+          ? `<span class="chip chip-warn">${attentionCount} due soon</span>`
+          : '';
+
+      return `
+      <article class="event-card${overdueCount || attentionCount ? ' is-urgent' : ''}" style="--i:${groupIdx}">
+        <header class="event-card-head">
+          <div class="event-card-titles">
+            <div class="event-card-title">
+              <h3>${escapeHtml(eventName)}</h3>
+              ${eventType ? `<span class="chip chip-type">${escapeHtml(eventType)}</span>` : ''}
+              ${urgencyChip}
+            </div>
+            <div class="event-card-meta">
+              <span class="event-card-dates">${escapeHtml(eventScheduleLabel(groupItems))}</span>
+              <span aria-hidden="true">·</span>
+              <span>${groupItems.length} item${groupItems.length === 1 ? '' : 's'}${counts.length ? ` · ${counts.join(' · ')}` : ''}</span>
+            </div>
+          </div>
+          <div class="event-card-actions">
             ${
               hasReservedToBorrow
                 ? `<button class="secondary-btn event-borrow-all-btn" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(reservedIdsAttr)}" type="button">Borrow All</button>`
@@ -475,91 +699,107 @@ function renderMyItems(items) {
             }
             ${
               allReserved
-                ? `<button class="secondary-btn event-reschedule-btn" data-event="${escapeHtml(eventName)}" type="button">Change Reservation Date</button>`
+                ? `<button class="secondary-btn event-reschedule-btn" data-event="${escapeHtml(eventName)}" type="button">Change Date</button>`
                 : ''
             }
             ${
-              hasCancellable
-                ? `<button class="remove-btn event-cancel-all-btn" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(cancellableIdsAttr)}" type="button">Remove All Reservations</button>`
+              cancellableItems.length
+                ? `<button class="remove-btn event-cancel-all-btn" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(cancellableIdsAttr)}" type="button">Remove All</button>`
                 : ''
             }
-            <button class="secondary-btn event-list-btn" data-event="${escapeHtml(eventName)}" type="button">Create Equipment List</button>
-          </td>
-        </tr>${
+            <button class="secondary-btn event-list-btn" data-event="${escapeHtml(eventName)}" type="button">Export List</button>
+          </div>
+        </header>
+        <div class="event-progress" title="${checkedOutItems.length} of ${activeItems.length} checked out">
+          <span data-width="${checkedOutShare}"></span>
+        </div>
+        ${
           allReserved
-            ? `<tr class="event-reschedule-row hidden" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(reservedIdsAttr)}">
-                <td colspan="5">
-                  <div class="input-row">
-                    <input type="date" class="event-reschedule-end-date" value="${currentEnd ? toLocalDateInputValue(currentEnd) : ''}">
-                    <input type="time" class="event-reschedule-end-time" value="${currentEnd ? toLocalTimeInputValue(currentEnd) : ''}">
-                    <button class="secondary-btn event-reschedule-save-btn" type="button">Save New Date</button>
-                    <button class="remove-btn event-reschedule-cancel-btn" type="button">Cancel</button>
-                  </div>
-                </td>
-              </tr>`
+            ? `<div class="event-reschedule-row hidden" data-event="${escapeHtml(eventName)}" data-equipment-ids="${escapeHtml(reservedIdsAttr)}">
+                <div class="input-row">
+                  <input type="date" class="event-reschedule-end-date" value="${currentEnd ? toLocalDateInputValue(currentEnd) : ''}">
+                  <input type="time" class="event-reschedule-end-time" value="${currentEnd ? toLocalTimeInputValue(currentEnd) : ''}">
+                  <button class="secondary-btn event-reschedule-save-btn" type="button">Save New Date</button>
+                  <button class="remove-btn event-reschedule-cancel-btn" type="button">Cancel</button>
+                </div>
+              </div>`
             : ''
-        }${groupItems.map(renderMyItemRow).join('')}`;
+        }
+        <div class="event-card-body">${groupItems.map(myItemRowHtml).join('')}</div>
+      </article>`;
     })
     .join('');
 
-  homeBody.querySelectorAll('.event-list-btn').forEach((btn) => {
+  // Widths are applied after insertion so the bars animate from 0 rather
+  // than rendering already full.
+  requestAnimationFrame(() => {
+    homeEvents.querySelectorAll('.event-progress span').forEach((bar) => {
+      bar.style.width = `${bar.dataset.width}%`;
+    });
+  });
+
+  wireMyItemHandlers();
+}
+
+function wireMyItemHandlers() {
+  homeEvents.querySelectorAll('.event-list-btn').forEach((btn) => {
     btn.addEventListener('click', () => createEventEquipmentList(btn.dataset.event));
   });
-  homeBody.querySelectorAll('.event-borrow-all-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.event-borrow-all-btn').forEach((btn) => {
     const ids = btn.dataset.equipmentIds ? btn.dataset.equipmentIds.split(',').filter(Boolean) : [];
     btn.addEventListener('click', () => homeBorrowAll(btn.dataset.event, ids));
   });
-  homeBody.querySelectorAll('.event-cancel-all-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.event-cancel-all-btn').forEach((btn) => {
     const ids = btn.dataset.equipmentIds ? btn.dataset.equipmentIds.split(',').filter(Boolean) : [];
     btn.addEventListener('click', () => homeCancelAll(btn.dataset.event, ids));
   });
-  homeBody.querySelectorAll('.event-reschedule-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.event-reschedule-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      // The reschedule row is always the very next sibling of this header
-      // row (see the template above), so this doesn't need any selector
-      // that could break on an event name with unusual characters.
-      const row = btn.closest('tr').nextElementSibling;
-      if (row && row.classList.contains('event-reschedule-row')) {
-        row.classList.toggle('hidden');
-      }
+      // The reschedule row is always the next element after the progress
+      // bar inside this card, so this doesn't need a selector that could
+      // break on an event name with unusual characters.
+      const row = btn.closest('.event-card').querySelector('.event-reschedule-row');
+      if (row) row.classList.toggle('hidden');
     });
   });
-  homeBody.querySelectorAll('.event-reschedule-cancel-btn').forEach((btn) => {
-    btn.addEventListener('click', () => btn.closest('tr').classList.add('hidden'));
+  homeEvents.querySelectorAll('.event-reschedule-cancel-btn').forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('.event-reschedule-row').classList.add('hidden'));
   });
-  homeBody.querySelectorAll('.event-reschedule-save-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.event-reschedule-save-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const row = btn.closest('tr');
+      const row = btn.closest('.event-reschedule-row');
       const ids = row.dataset.equipmentIds ? row.dataset.equipmentIds.split(',').filter(Boolean) : [];
-      const dateValue = row.querySelector('.event-reschedule-end-date').value;
-      const timeValue = row.querySelector('.event-reschedule-end-time').value;
-      homeReschedule(row.dataset.event, ids, dateValue, timeValue);
+      homeReschedule(
+        row.dataset.event,
+        ids,
+        row.querySelector('.event-reschedule-end-date').value,
+        row.querySelector('.event-reschedule-end-time').value
+      );
     });
   });
-  homeBody.querySelectorAll('.home-borrow-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.home-borrow-btn').forEach((btn) => {
     btn.addEventListener('click', () => homeBorrowNow(btn.dataset.equipmentId, btn.dataset.item));
   });
-  homeBody.querySelectorAll('.home-end-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.home-end-btn, .home-cancel-btn').forEach((btn) => {
     btn.addEventListener('click', () => homeCancelReservation(btn.dataset.equipmentId, btn.dataset.item));
   });
-  homeBody.querySelectorAll('.home-cancel-btn').forEach((btn) => {
-    btn.addEventListener('click', () => homeCancelReservation(btn.dataset.equipmentId, btn.dataset.item));
-  });
-  homeBody.querySelectorAll('.home-admin-return-btn').forEach((btn) => {
+  homeEvents.querySelectorAll('.home-admin-return-btn').forEach((btn) => {
     btn.addEventListener('click', () => homeReturnDirect(btn.dataset.equipmentId, btn.dataset.item));
   });
-  homeBody.querySelectorAll('.home-return-scan-group').forEach((group) => {
+  homeEvents.querySelectorAll('.home-return-scan-group').forEach((group) => {
     const equipmentId = group.dataset.equipmentId;
     const itemLabel = group.dataset.item;
     const input = group.querySelector('.home-return-scan-input');
     const camBtn = group.querySelector('.home-scan-camera-btn');
     // This field only accepts a physical barcode scanner's input, never
-    // manual keyboard typing - see bindScanOnlyInput below.
+    // manual keyboard typing - see bindScanOnlyInput above.
     bindScanOnlyInput(input, (scanned) => homeReturnByScan(equipmentId, scanned, input, itemLabel));
     // Camera path reuses the same scanner modal as every other tab - it sets
     // input.value directly (see onScanSuccess), bypassing the keydown-timing
     // check entirely, so it's unaffected by the restriction above.
-    camBtn.addEventListener('click', () => startScanner(input, () => homeReturnByScan(equipmentId, input.value, input, itemLabel)));
+    camBtn.addEventListener('click', () =>
+      startScanner(input, () => homeReturnByScan(equipmentId, input.value, input, itemLabel))
+    );
   });
 }
 
@@ -571,7 +811,7 @@ function renderMyItems(items) {
 // someone else's My Items list downloads that employee's list, not their
 // own).
 async function createEventEquipmentList(eventName) {
-  setMessage(homeMessage, 'Generating document…', null);
+  setMessage(homeMessage, 'Generating document…', 'info');
   try {
     const res = await fetch(
       `/api/export/event/${encodeURIComponent(homeViewingId)}?event=${encodeURIComponent(eventName)}`
@@ -1400,12 +1640,16 @@ function renderTeamAccordion() {
           <span class="team-name">${escapeHtml(team)}</span>
           <span class="team-meta" data-team-meta="${escapeHtml(team)}">${teamMetaText(items.length, availableCount, selectedCount)}</span>
         </button>
-        <div class="team-body${expanded ? '' : ' hidden'}">
-          ${
-            visible.length === 0
-              ? '<p class="empty-note">No equipment in this team.</p>'
-              : `${categoryTabs}<div class="pick-cards">${cards}</div>`
-          }
+        <div class="team-body">
+          <div class="team-body-inner">
+            <div class="team-body-pad">
+              ${
+                visible.length === 0
+                  ? '<p class="empty-note">No equipment in this team.</p>'
+                  : `${categoryTabs}<div class="pick-cards">${cards}</div>`
+              }
+            </div>
+          </div>
         </div>
       </div>`;
     })
@@ -1720,7 +1964,7 @@ requestCompleteBtn.addEventListener('click', async () => {
 });
 
 exportBtn.addEventListener('click', async () => {
-  setMessage(requestStatusMessage, 'Generating document…', null);
+  setMessage(requestStatusMessage, 'Generating document…', 'info');
   try {
     const res = await fetch(`/api/export/${encodeURIComponent(employeeId)}`);
     if (!res.ok) {
@@ -1886,18 +2130,51 @@ function equipmentLabelMatches(it, query) {
 // =======================================================
 // VIEW INVENTORY TAB
 // =======================================================
+// A data grid rather than the old ten-column table. The grid shows what
+// people scan for - what it is, whose team, what state, who has it - and a
+// detail drawer (click any row) carries everything else, including every
+// admin-editable field. That keeps the columns readable at a glance without
+// losing a single field that used to be on screen.
 const inventoryBody = document.getElementById('inventoryBody');
+const inventoryGrid = document.getElementById('inventoryGrid');
 const inventoryMessage = document.getElementById('inventoryMessage');
+const inventorySearchInput = document.getElementById('inventorySearch');
+const inventorySearchClear = document.getElementById('inventorySearchClear');
+const inventoryCountEl = document.getElementById('inventoryCount');
+const categoryFilter = document.getElementById('categoryFilter');
 const inventoryFilterInputs = document.querySelectorAll('.col-filter');
-document.getElementById('refreshInventoryBtn').addEventListener('click', loadInventory);
 
 let inventoryItems = []; // full unfiltered dataset from the server
-let inventoryFilters = {}; // { colKey: lowercased filter text (or exact status value) }
+let inventoryFilters = {}; // { colKey: lowercased filter value }
+let inventoryQuery = '';
+// null means "server order" (equipmentId ascending, as sent).
+let inventorySort = null; // { key, dir: 'asc' | 'desc' }
+
+document.getElementById('refreshInventoryBtn').addEventListener('click', () => loadInventory());
+
+// ---------- Search ----------
+
+inventorySearchInput.addEventListener('input', () => {
+  inventoryQuery = inventorySearchInput.value.trim().toLowerCase();
+  inventorySearchClear.classList.toggle('hidden', !inventoryQuery);
+  applyInventoryFilters();
+});
+
+inventorySearchClear.addEventListener('click', () => {
+  inventorySearchInput.value = '';
+  inventoryQuery = '';
+  inventorySearchClear.classList.add('hidden');
+  applyInventoryFilters();
+  inventorySearchInput.focus();
+});
+
+// ---------- Filter chips ----------
 
 inventoryFilterInputs.forEach((el) => {
-  const eventName = el.tagName === 'SELECT' ? 'change' : 'input';
-  el.addEventListener(eventName, () => {
+  el.addEventListener('change', () => {
     inventoryFilters[el.dataset.col] = el.value.trim().toLowerCase();
+    // An active filter is tinted, so it's obvious why rows are missing.
+    el.classList.toggle('is-active', Boolean(el.value));
     applyInventoryFilters();
   });
 });
@@ -1905,15 +2182,75 @@ inventoryFilterInputs.forEach((el) => {
 document.getElementById('clearFiltersBtn').addEventListener('click', () => {
   inventoryFilterInputs.forEach((el) => {
     el.value = '';
+    el.classList.remove('is-active');
   });
+  inventorySearchInput.value = '';
+  inventorySearchClear.classList.add('hidden');
   inventoryFilters = {};
+  inventoryQuery = '';
   applyInventoryFilters();
 });
+
+// ---------- Sorting ----------
+
+inventoryGrid.querySelectorAll('th.sortable').forEach((th) => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    // asc -> desc -> back to the server's own ordering
+    if (!inventorySort || inventorySort.key !== key) inventorySort = { key, dir: 'asc' };
+    else if (inventorySort.dir === 'asc') inventorySort = { key, dir: 'desc' };
+    else inventorySort = null;
+    applyInventoryFilters();
+  });
+});
+
+function syncSortIndicators() {
+  inventoryGrid.querySelectorAll('th.sortable').forEach((th) => {
+    const active = inventorySort && inventorySort.key === th.dataset.sort;
+    th.classList.toggle('sort-asc', Boolean(active) && inventorySort.dir === 'asc');
+    th.classList.toggle('sort-desc', Boolean(active) && inventorySort.dir === 'desc');
+    th.setAttribute(
+      'aria-sort',
+      active ? (inventorySort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
+    );
+  });
+}
+
+// ---------- Density ----------
+// Remembered per browser so someone who prefers dense rows doesn't have to
+// re-pick it on every visit. Storage can throw outright (private windows,
+// blocked site data), so both directions are guarded.
+const densityToggle = document.getElementById('densityToggle');
+
+function setDensity(density, persist) {
+  inventoryGrid.classList.toggle('is-compact', density === 'compact');
+  densityToggle.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.density === density);
+  });
+  if (persist) {
+    try {
+      localStorage.setItem('inv.density', density);
+    } catch (err) {
+      /* storage unavailable - the choice just won't survive a reload */
+    }
+  }
+}
+
+densityToggle.querySelectorAll('button').forEach((btn) => {
+  btn.addEventListener('click', () => setDensity(btn.dataset.density, true));
+});
+
+try {
+  const savedDensity = localStorage.getItem('inv.density');
+  if (savedDensity) setDensity(savedDensity, false);
+} catch (err) {
+  /* storage unavailable - fall through to the default comfortable density */
+}
 
 // ---------- Admin-only: CSV import ----------
 // Adds new equipment (never updates existing rows) from a CSV file with
 // additionalInfo, comment, employeeId, equipmentId, item, and status
-// columns required, plus optional ports, location, and category columns.
+// columns required, plus optional ports, location, category and team.
 const importCsvBtn = document.getElementById('importCsvBtn');
 const importCsvFile = document.getElementById('importCsvFile');
 const importResultMessage = document.getElementById('importResultMessage');
@@ -1928,7 +2265,7 @@ if (importCsvFile) {
     importCsvFile.value = ''; // reset so selecting the same file again still fires "change"
     if (!file) return;
 
-    setMessage(importResultMessage, 'Importing…', null);
+    setMessage(importResultMessage, 'Importing…', 'info');
 
     try {
       const csvText = await file.text();
@@ -1945,6 +2282,7 @@ if (importCsvFile) {
       }
 
       setMessage(importResultMessage, data.message, 'success');
+      showToast(data.message, 'success');
       await loadInventory();
     } catch (err) {
       setMessage(importResultMessage, 'Could not reach the server.', 'error');
@@ -1952,31 +2290,25 @@ if (importCsvFile) {
   });
 }
 
-function teamMatches(value, filterValue) {
-  if (!filterValue) return true;
-  const team = String(value || '').trim().toLowerCase();
-  if (filterValue === '__unassigned__') return team === '';
-  return team === filterValue;
-}
+// ---------- Shared formatting helpers ----------
 
 function textMatches(value, filterValue) {
   if (!filterValue) return true;
-  return String(value || '')
-    .toLowerCase()
-    .includes(filterValue);
+  return String(value || '').toLowerCase().includes(filterValue);
 }
 
+// Medium date + short time, so a due date reads "6 Sep 2026, 11:59 PM"
+// rather than toLocaleString()'s default, which tacks on seconds nobody set
+// and nobody needs.
 function formatDateTime(value) {
   if (!value) return '-';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleString();
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 // Formats a Date into the value strings <input type="date">/<input
-// type="time"> expect, in the browser's own local time (not UTC) - used to
-// pre-fill the "Change Reservation Date" fields with the reservation's
-// current end.
+// type="time"> expect, in the browser's own local time (not UTC).
 function toLocalDateInputValue(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
@@ -1991,171 +2323,196 @@ function toLocalTimeInputValue(value) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function holderLabel(i) {
+  if (!i.employeeId) return null;
+  return i.employeeName ? `${i.employeeName} (${i.employeeId})` : i.employeeId;
+}
+
+// ---------- Load ----------
+
 async function loadInventory() {
-  inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Loading inventory…</td></tr>';
+  if (inventoryItems.length === 0) {
+    inventoryBody.innerHTML = `<tr><td colspan="7">${skeletonBlocks(8, 'skeleton-row')}</td></tr>`;
+  }
   setMessage(inventoryMessage, '', null);
   try {
     const res = await fetch('/api/equipment');
     const items = await res.json();
 
     if (!res.ok) {
-      inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Could not load inventory.</td></tr>';
+      inventoryBody.innerHTML = '<tr><td colspan="7"><div class="grid-empty">Could not load inventory.</div></td></tr>';
       return;
     }
 
     inventoryItems = items;
+    syncCategoryFilterOptions();
     applyInventoryFilters();
     // Step 2 of the Borrow/Reserve tab is built off this exact dataset, so
-    // every refresh (here, the tab switch above, or its own Refresh button)
-    // keeps its availability badges and cart honest.
+    // every refresh keeps its availability badges and cart honest.
     refreshRequestPicker();
+    // A drawer left open while this reloads would otherwise keep showing
+    // the values from before the refresh.
+    if (openDrawerId) renderDrawer(openDrawerId);
   } catch (err) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Could not reach the server.</td></tr>';
+    inventoryBody.innerHTML = '<tr><td colspan="7"><div class="grid-empty">Could not reach the server.</div></td></tr>';
   }
 }
 
-// Filtering happens entirely client-side against the already-loaded dataset,
-// so typing in a column filter is instant and doesn't hit the server.
+// The category list is whatever the data actually contains, so a new
+// category shows up as a filter option without a code change.
+function syncCategoryFilterOptions() {
+  const current = categoryFilter.value;
+  const categories = [...new Set(inventoryItems.map((i) => (i.category || '').trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  categoryFilter.innerHTML =
+    '<option value="">All categories</option>' +
+    categories.map((c) => `<option value="${escapeHtml(c.toLowerCase())}">${escapeHtml(c)}</option>`).join('') +
+    '<option value="__uncategorized__">Uncategorized</option>';
+  categoryFilter.value = current;
+  categoryFilter.classList.toggle('is-active', Boolean(categoryFilter.value));
+}
+
+// ---------- Filter + sort ----------
+
+function teamMatches(value, filterValue) {
+  if (!filterValue) return true;
+  const team = String(value || '').trim().toLowerCase();
+  if (filterValue === '__unassigned__') return team === '';
+  return team === filterValue;
+}
+
+function categoryMatches(value, filterValue) {
+  if (!filterValue) return true;
+  const category = String(value || '').trim().toLowerCase();
+  if (filterValue === '__uncategorized__') return category === '';
+  return category === filterValue;
+}
+
+// One search box across every field someone might remember an item by,
+// instead of a filter input per column.
+function matchesQuery(i) {
+  if (!inventoryQuery) return true;
+  return [i.equipmentId, i.item, i.team, i.category, i.comment, i.additionalInfo, i.location, i.ports, i.event, holderLabel(i)]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .includes(inventoryQuery);
+}
+
+function sortValue(i, key) {
+  if (key === 'holder') return holderLabel(i) || '';
+  if (key === 'status') return normalizeStatusLabel(i.status) || '';
+  return i[key] || '';
+}
+
+// Filtering and sorting happen entirely client-side against the already
+// loaded dataset, so typing in the search box is instant.
 function applyInventoryFilters() {
-  const filtered = inventoryItems.filter((i) => {
-    const borrowerText = i.employeeId ? `${i.employeeName || ''} ${i.employeeId}` : '';
-    const lastBorrowedText = i.lastBorrowedBy ? `${i.lastBorrowedByName || ''} ${i.lastBorrowedBy}` : '';
-    const lastBorrowedDateText = formatDateTime(i.lastBorrowedAt);
-
-    return (
-      textMatches(i.equipmentId, inventoryFilters.equipmentId) &&
-      textMatches(i.item, inventoryFilters.item) &&
-      // The Team filter is a fixed dropdown rather than free text, so it
-      // needs an exact match - plus its own sentinel for the blank/missing
-      // values that the Borrow/Reserve picker groups under "Unassigned".
+  let filtered = inventoryItems.filter(
+    (i) =>
+      matchesQuery(i) &&
       teamMatches(i.team, inventoryFilters.team) &&
-      // Case-insensitive: some existing inventory rows have status stored
-      // in uppercase (AVAILABLE/UNAVAILABLE/RESERVED) while the app's own
-      // borrow/return/reserve actions write proper case (Available/...) -
-      // both need to match the same filter selection.
-      (!inventoryFilters.status || String(i.status || '').toLowerCase() === inventoryFilters.status) &&
-      textMatches(i.comment, inventoryFilters.comment) &&
-      textMatches(i.additionalInfo, inventoryFilters.additionalInfo) &&
-      textMatches(borrowerText, inventoryFilters.borrower) &&
-      textMatches(i.event, inventoryFilters.event) &&
-      textMatches(lastBorrowedText, inventoryFilters.lastBorrowedByName) &&
-      textMatches(lastBorrowedDateText, inventoryFilters.lastBorrowedAt)
-    );
-  });
+      categoryMatches(i.category, inventoryFilters.category) &&
+      // Case-insensitive: some existing rows have status stored in
+      // uppercase while the app's own writes use proper case.
+      (!inventoryFilters.status || String(i.status || '').toLowerCase() === inventoryFilters.status)
+  );
 
+  if (inventorySort) {
+    const { key, dir } = inventorySort;
+    const sign = dir === 'asc' ? 1 : -1;
+    filtered = [...filtered].sort((a, b) => {
+      const cmp = String(sortValue(a, key)).localeCompare(String(sortValue(b, key)), undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      });
+      // Equipment ID is the tiebreaker so equal values keep a stable order.
+      return cmp !== 0 ? cmp * sign : a.equipmentId.localeCompare(b.equipmentId);
+    });
+  }
+
+  syncSortIndicators();
   renderInventoryRows(filtered);
 }
 
-// Note: Purpose is intentionally left off this table (still tracked in the
-// database and included in the Word export) - hidden from the web UI only.
+// ---------- Render ----------
+
 function renderInventoryRows(items) {
-  if (inventoryItems.length === 0) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">No equipment in the database.</td></tr>';
+  const total = inventoryItems.length;
+  inventoryCountEl.textContent =
+    items.length === total ? `${total} item${total === 1 ? '' : 's'}` : `${items.length} of ${total} items`;
+
+  if (total === 0) {
+    inventoryBody.innerHTML = '<tr><td colspan="7"><div class="grid-empty">No equipment in the database yet.</div></td></tr>';
     return;
   }
   if (items.length === 0) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">No equipment matches the current filters.</td></tr>';
+    inventoryBody.innerHTML =
+      '<tr><td colspan="7"><div class="grid-empty">No equipment matches the current search and filters.</div></td></tr>';
     return;
   }
 
-  const STATUS_OPTIONS = ['Available', 'Unavailable', 'Reserved'];
-
-  // Plain admin text-field cell: same look as the Comment/Additional Info
-  // inputs, but wired to the admin-only PATCH .../field endpoint instead.
-  function adminField(equipmentId, field, value, placeholder, title) {
-    return `
-      <input
-        type="text"
-        class="comment-input admin-field"
-        data-equipment-id="${escapeHtml(equipmentId)}"
-        data-field="${field}"
-        value="${escapeHtml(value || '')}"
-        placeholder="${escapeHtml(placeholder || '')}"
-        ${title ? `title="${escapeHtml(title)}"` : ''}
-      >`;
-  }
-
   inventoryBody.innerHTML = items
-    .map((i) => {
+    .map((i, idx) => {
       const statusLabel = normalizeStatusLabel(i.status);
       const pillClass =
-        statusLabel === 'Available' ? 'status-available' : statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
-      const borrower = i.employeeId ? `${escapeHtml(i.employeeName)} (${escapeHtml(i.employeeId)})` : '-';
-      const lastBorrower = i.lastBorrowedBy
-        ? `${escapeHtml(i.lastBorrowedByName)} (${escapeHtml(i.lastBorrowedBy)})`
-        : '-';
+        statusLabel === 'Available'
+          ? 'status-available'
+          : statusLabel === 'Reserved'
+            ? 'status-reserved'
+            : 'status-unavailable';
 
-      // Admin gets every cell as an editable control; everyone else keeps
-      // the existing read-only display (Comment/Additional Info stay
-      // editable for all users, unchanged).
-      // Equipment ID is the lead column here - it's the item's own barcode
-      // value, visible to every user (not just Admin).
-      const equipmentIdCell = `<span class="tag-chip">${escapeHtml(i.equipmentId) || '-'}</span>`;
-      const itemCell = isAdmin ? adminField(i.equipmentId, 'item', i.item) : escapeHtml(i.item);
-      // Team decides which group an item shows under in step 2 of the
-      // Borrow/Reserve tab, so Admin gets a fixed dropdown here rather than
-      // a text box - a typo would strand the item in a group of its own.
-      // Blank is a real choice: it means "Unassigned" in the picker.
-      const teamCell = isAdmin
-        ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="team">
-            <option value="" ${!i.team ? 'selected' : ''}>Unassigned</option>
-            ${TEAM_OPTIONS.map(
-              (opt) => `<option value="${escapeHtml(opt)}" ${opt === i.team ? 'selected' : ''}>${escapeHtml(opt)}</option>`
-            ).join('')}
-          </select>`
-        : escapeHtml(i.team) || '-';
-      // A reservation hold (reservedUntil) can be active while the item is
-      // physically checked out (status Unavailable, from the reserving
-      // employee borrowing it mid-window). Rather than one pill trying to
-      // say both things at once, show the base Available/Unavailable status
-      // and a separate "Reserved" badge beside it whenever that's the case.
+      // A reservation hold can be active while the item is physically
+      // checked out (the reserving employee borrowed it mid-window), so the
+      // hold gets its own badge beside the base status rather than one pill
+      // trying to say both things.
       const reservationActive = Boolean(i.reservedUntil) && new Date(i.reservedUntil).getTime() > Date.now();
-      const showReservedBadge = statusLabel === 'Unavailable' && reservationActive;
-      const reservedBadge = showReservedBadge
-        ? `<span class="status-pill status-reserved-badge" title="${escapeHtml(i.event || '')}">Reserved${
-            i.event ? ` · ${escapeHtml(i.event)}` : ''
-          } until ${formatDateTime(i.reservedUntil)}</span>`
-        : '';
-      // A pending (future-start) reservation doesn't change status at all -
-      // the item stays Available for anyone to borrow/reserve in the
-      // meantime - but it's still worth flagging here so it doesn't look
-      // like this Available item is free indefinitely.
+      const reservedBadge =
+        statusLabel === 'Unavailable' && reservationActive
+          ? `<span class="status-pill status-reserved-badge" title="${escapeHtml(i.event || '')}">Reserved until ${escapeHtml(formatDateTime(i.reservedUntil))}</span>`
+          : '';
+      // A pending (future-start) reservation doesn't change status at all,
+      // but it's worth flagging so an Available item doesn't look free
+      // indefinitely.
       const pendingActive = Boolean(i.pendingReservation) && new Date(i.pendingReservation.end).getTime() > Date.now();
       const upcomingBadge = pendingActive
-        ? `<span class="status-pill status-upcoming-badge" title="${escapeHtml(i.pendingReservation.event || '')}">Upcoming${
-            i.pendingReservation.event ? ` · ${escapeHtml(i.pendingReservation.event)}` : ''
-          } from ${formatDateTime(i.pendingReservation.start)}</span>`
+        ? `<span class="status-pill status-upcoming-badge" title="${escapeHtml(i.pendingReservation.event || '')}">Upcoming from ${escapeHtml(formatDateTime(i.pendingReservation.start))}</span>`
         : '';
-      const baseStatusControl = isAdmin
-        ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="status">
-            ${STATUS_OPTIONS.map(
-              (opt) => `<option value="${opt}" ${opt === statusLabel ? 'selected' : ''}>${opt}</option>`
-            ).join('')}
-          </select>`
-        : `<span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>`;
-      const statusCell = `<div class="status-cell-group">${baseStatusControl}${reservedBadge}${upcomingBadge}</div>`;
-      const borrowedByCell = isAdmin
-        ? adminField(i.equipmentId, 'employeeId', i.employeeId, 'Employee ID')
-        : borrower;
-      const eventCell = isAdmin ? adminField(i.equipmentId, 'event', i.event, 'Event') : escapeHtml(i.event) || '-';
-      const lastBorrowedByCell = isAdmin
-        ? adminField(i.equipmentId, 'lastBorrowedBy', i.lastBorrowedBy, 'Employee ID')
-        : lastBorrower;
-      const lastBorrowedAtCell = isAdmin
-        ? adminField(
-            i.equipmentId,
-            'lastBorrowedAt',
-            i.lastBorrowedAt ? new Date(i.lastBorrowedAt).toISOString().slice(0, 10) : '',
-            'YYYY-MM-DD'
-          )
-        : formatDateTime(i.lastBorrowedAt);
+
+      const holder = holderLabel(i);
+      const assignedSub = i.event
+        ? `<span class="cell-sub">${escapeHtml(i.event)}</span>`
+        : pendingActive && i.pendingReservation.event
+          ? `<span class="cell-sub">${escapeHtml(i.pendingReservation.event)}</span>`
+          : '';
+      const itemSub = [i.location, i.ports].filter(Boolean).join(' · ');
 
       return `
-      <tr>
-        <td>${equipmentIdCell}</td>
-        <td>${itemCell}</td>
-        <td>${teamCell}</td>
-        <td>${statusCell}</td>
+      <tr data-equipment-id="${escapeHtml(i.equipmentId)}" style="--i:${idx}">
+        <td>
+          <div class="cell-equipment">
+            <span class="tag-chip">${escapeHtml(i.equipmentId)}</span>
+            <span class="cell-stack">
+              <span class="cell-item-name">${escapeHtml(i.item)}</span>
+              ${itemSub ? `<span class="cell-sub">${escapeHtml(itemSub)}</span>` : ''}
+            </span>
+          </div>
+        </td>
+        <td>${i.team ? escapeHtml(i.team) : '<span class="cell-muted">Unassigned</span>'}</td>
+        <td>${i.category ? escapeHtml(i.category) : '<span class="cell-muted">—</span>'}</td>
+        <td>
+          <div class="status-cell-group">
+            <span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>
+            ${reservedBadge}${upcomingBadge}
+          </div>
+        </td>
+        <td>
+          <span class="cell-stack">
+            <span>${holder ? escapeHtml(holder) : '<span class="cell-muted">—</span>'}</span>
+            ${assignedSub}
+          </span>
+        </td>
         <td>
           <input
             type="text"
@@ -2168,26 +2525,175 @@ function renderInventoryRows(items) {
           >
         </td>
         <td>
-          <input
-            type="text"
-            class="comment-input"
-            data-equipment-id="${escapeHtml(i.equipmentId)}"
-            data-field="additionalInfo"
-            data-endpoint="additional-info"
-            value="${escapeHtml(i.additionalInfo)}"
-            placeholder="Add additional information…"
-          >
+          <button type="button" class="row-open-btn" aria-label="Open details for ${escapeHtml(i.equipmentId)}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6 8.6 7.4 13.2 12l-4.6 4.6L10 18l6-6z"/></svg>
+          </button>
         </td>
-        <td>${borrowedByCell}</td>
-        <td>${eventCell}</td>
-        <td>${lastBorrowedByCell}</td>
-        <td>${lastBorrowedAtCell}</td>
       </tr>`;
     })
     .join('');
 
-  // Comment/Additional Information: unchanged, open to every user.
-  inventoryBody.querySelectorAll('.comment-input[data-endpoint]').forEach((input) => {
+  wireEditableInputs(inventoryBody);
+
+  // Clicking anywhere on a row opens its detail drawer, except on the
+  // inline comment box - editing a comment shouldn't also pop a panel.
+  inventoryBody.querySelectorAll('tr[data-equipment-id]').forEach((tr) => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('input, select, textarea')) return;
+      openDrawer(tr.dataset.equipmentId);
+    });
+  });
+}
+
+// ---------- Detail drawer ----------
+
+const detailDrawer = document.getElementById('detailDrawer');
+const drawerTitle = document.getElementById('drawerTitle');
+const drawerSub = document.getElementById('drawerSub');
+const drawerBody = document.getElementById('drawerBody');
+let openDrawerId = null;
+
+function openDrawer(equipmentId) {
+  openDrawerId = equipmentId;
+  renderDrawer(equipmentId);
+  detailDrawer.classList.remove('hidden');
+  detailDrawer.querySelector('.drawer-close').focus();
+}
+
+function closeDrawer() {
+  openDrawerId = null;
+  detailDrawer.classList.add('hidden');
+}
+
+detailDrawer.querySelectorAll('[data-drawer-close]').forEach((el) => {
+  el.addEventListener('click', closeDrawer);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && openDrawerId) closeDrawer();
+});
+
+// An admin-editable field inside the drawer. Same endpoint and handler as
+// the inline grid inputs, just laid out as a form.
+function drawerAdminField(i, field, value, placeholder) {
+  return `<input type="text" class="comment-input admin-field" data-equipment-id="${escapeHtml(i.equipmentId)}"
+    data-field="${field}" value="${escapeHtml(value || '')}" placeholder="${escapeHtml(placeholder || '')}">`;
+}
+
+function drawerAdminSelect(i, field, value, options, blankLabel) {
+  return `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="${field}">
+    ${blankLabel ? `<option value="" ${!value ? 'selected' : ''}>${escapeHtml(blankLabel)}</option>` : ''}
+    ${options
+      .map((opt) => `<option value="${escapeHtml(opt)}" ${opt === value ? 'selected' : ''}>${escapeHtml(opt)}</option>`)
+      .join('')}
+  </select>`;
+}
+
+function renderDrawer(equipmentId) {
+  const i = inventoryItems.find((it) => it.equipmentId === equipmentId);
+  if (!i) {
+    closeDrawer();
+    return;
+  }
+
+  const statusLabel = normalizeStatusLabel(i.status);
+  const pillClass =
+    statusLabel === 'Available' ? 'status-available' : statusLabel === 'Reserved' ? 'status-reserved' : 'status-unavailable';
+  const holder = holderLabel(i);
+  const pendingActive = Boolean(i.pendingReservation) && new Date(i.pendingReservation.end).getTime() > Date.now();
+
+  drawerTitle.textContent = i.item;
+  drawerSub.innerHTML = `
+    <span class="tag-chip">${escapeHtml(i.equipmentId)}</span>
+    <span class="status-pill ${pillClass}">${escapeHtml(statusLabel)}</span>`;
+
+  const assignment = [
+    ['Assigned to', holder ? escapeHtml(holder) : '<span class="cell-muted">Nobody</span>'],
+    ['Event', i.event ? escapeHtml(i.event) : '<span class="cell-muted">—</span>'],
+    ['Event type', i.purpose ? escapeHtml(i.purpose) : '<span class="cell-muted">—</span>'],
+    ['Due back', i.borrowUntil ? escapeHtml(formatDateTime(i.borrowUntil)) : '<span class="cell-muted">—</span>'],
+    ['Held until', i.reservedUntil ? escapeHtml(formatDateTime(i.reservedUntil)) : '<span class="cell-muted">—</span>'],
+    [
+      'Upcoming hold',
+      pendingActive
+        ? `${escapeHtml(i.pendingReservation.event || 'Reserved')}<br><span class="cell-sub">${escapeHtml(
+            formatDateTime(i.pendingReservation.start)
+          )} → ${escapeHtml(formatDateTime(i.pendingReservation.end))} · ${escapeHtml(i.pendingReservation.employeeId)}</span>`
+        : '<span class="cell-muted">None</span>'
+    ]
+  ];
+
+  const details = [
+    ['Team', i.team ? escapeHtml(i.team) : '<span class="cell-muted">Unassigned</span>'],
+    ['Category', i.category ? escapeHtml(i.category) : '<span class="cell-muted">—</span>'],
+    ['Location', i.location ? escapeHtml(i.location) : '<span class="cell-muted">—</span>'],
+    ['Ports', i.ports ? escapeHtml(i.ports) : '<span class="cell-muted">—</span>']
+  ];
+
+  const history = [
+    [
+      'Last borrowed by',
+      i.lastBorrowedBy
+        ? escapeHtml(`${i.lastBorrowedByName || 'Unknown'} (${i.lastBorrowedBy})`)
+        : '<span class="cell-muted">Never</span>'
+    ],
+    ['Last borrowed at', i.lastBorrowedAt ? escapeHtml(formatDateTime(i.lastBorrowedAt)) : '<span class="cell-muted">—</span>']
+  ];
+
+  const dl = (rows) =>
+    `<dl class="detail-list">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+
+  // Comment and Additional Information stay editable for every user, exactly
+  // as they were in the old table - they've just moved into the drawer
+  // (Comment is also still inline in the grid).
+  const notes = `
+    <dl class="detail-list">
+      <dt>Comment</dt>
+      <dd><input type="text" class="comment-input" data-equipment-id="${escapeHtml(i.equipmentId)}"
+        data-field="comment" data-endpoint="comment" value="${escapeHtml(i.comment)}" placeholder="Add a comment…"></dd>
+      <dt>Additional info</dt>
+      <dd><input type="text" class="comment-input" data-equipment-id="${escapeHtml(i.equipmentId)}"
+        data-field="additionalInfo" data-endpoint="additional-info" value="${escapeHtml(i.additionalInfo)}"
+        placeholder="Add additional information…"></dd>
+    </dl>`;
+
+  const adminSection = isAdmin
+    ? `
+    <div class="drawer-section">
+      <h4>Admin fields</h4>
+      <p class="drawer-admin-note">These write straight to the record. Press Enter or click away to save.</p>
+      <dl class="detail-list">
+        <dt>Equipment ID</dt><dd>${drawerAdminField(i, 'equipmentId', i.equipmentId)}</dd>
+        <dt>Item</dt><dd>${drawerAdminField(i, 'item', i.item)}</dd>
+        <dt>Team</dt><dd>${drawerAdminSelect(i, 'team', i.team, TEAM_OPTIONS, 'Unassigned')}</dd>
+        <dt>Category</dt><dd>${drawerAdminField(i, 'category', i.category, 'e.g. Camera')}</dd>
+        <dt>Location</dt><dd>${drawerAdminField(i, 'location', i.location)}</dd>
+        <dt>Ports</dt><dd>${drawerAdminField(i, 'ports', i.ports)}</dd>
+        <dt>Status</dt><dd>${drawerAdminSelect(i, 'status', statusLabel, ['Available', 'Unavailable', 'Reserved'], '')}</dd>
+        <dt>Assigned to</dt><dd>${drawerAdminField(i, 'employeeId', i.employeeId, 'Employee ID')}</dd>
+        <dt>Event</dt><dd>${drawerAdminField(i, 'event', i.event, 'Event name')}</dd>
+        <dt>Held until</dt><dd>${drawerAdminField(i, 'reservedUntil', i.reservedUntil ? formatDateTime(i.reservedUntil) : '', 'Blank to clear')}</dd>
+        <dt>Last borrowed by</dt><dd>${drawerAdminField(i, 'lastBorrowedBy', i.lastBorrowedBy, 'Employee ID')}</dd>
+        <dt>Last borrowed at</dt><dd>${drawerAdminField(i, 'lastBorrowedAt', i.lastBorrowedAt ? new Date(i.lastBorrowedAt).toISOString().slice(0, 10) : '', 'YYYY-MM-DD')}</dd>
+      </dl>
+    </div>`
+    : '';
+
+  drawerBody.innerHTML = `
+    <div class="drawer-section"><h4>Assignment</h4>${dl(assignment)}</div>
+    <div class="drawer-section"><h4>Details</h4>${dl(details)}</div>
+    <div class="drawer-section"><h4>Notes</h4>${notes}</div>
+    <div class="drawer-section"><h4>History</h4>${dl(history)}</div>
+    ${adminSection}`;
+
+  wireEditableInputs(drawerBody);
+}
+
+// ---------- Saving edits ----------
+// Shared by the grid's inline comment cells and every field in the drawer,
+// so both go through the same endpoints and the same feedback.
+function wireEditableInputs(root) {
+  root.querySelectorAll('.comment-input[data-endpoint]').forEach((input) => {
     input.dataset.original = input.value;
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -2198,29 +2704,27 @@ function renderInventoryRows(items) {
     input.addEventListener('blur', () => saveEditableField(input));
   });
 
-  // Every other cell: Admin-only, hits the generic field-edit endpoint.
-  if (isAdmin) {
-    inventoryBody.querySelectorAll('.admin-field').forEach((input) => {
-      input.dataset.original = input.value;
-      if (input.tagName === 'SELECT') {
-        input.addEventListener('change', () => saveAdminField(input));
-      } else {
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            input.blur();
-          }
-        });
-        input.addEventListener('blur', () => saveAdminField(input));
-      }
-    });
-  }
+  if (!isAdmin) return;
+  root.querySelectorAll('.admin-field').forEach((input) => {
+    input.dataset.original = input.value;
+    if (input.tagName === 'SELECT') {
+      input.addEventListener('change', () => saveAdminField(input));
+    } else {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          input.blur();
+        }
+      });
+      input.addEventListener('blur', () => saveAdminField(input));
+    }
+  });
 }
 
-// Admin-only counterpart to saveEditableField() above - saves any inventory
-// cell via PATCH /api/equipment/:id/field, then reloads the whole table
-// since editing a field like equipmentId or status can change how other
-// rows/cells should display (borrower names, tag chips, etc.).
+// Admin-only counterpart to saveEditableField below - saves any field via
+// PATCH /api/equipment/:id/field, then reloads, since editing something like
+// equipmentId or status changes how other rows should display. The result is
+// announced with a toast because that reload wipes any inline message.
 async function saveAdminField(input) {
   const newValue = input.value.trim();
   if (newValue === input.dataset.original) return;
@@ -2228,7 +2732,6 @@ async function saveAdminField(input) {
   const equipmentId = input.dataset.equipmentId;
   const field = input.dataset.field;
   input.disabled = true;
-  setMessage(inventoryMessage, '', null);
 
   try {
     const res = await fetch(`/api/equipment/${encodeURIComponent(equipmentId)}/field`, {
@@ -2242,29 +2745,32 @@ async function saveAdminField(input) {
       input.value = input.dataset.original;
       input.disabled = false;
       flashCommentInput(input, false);
-      setMessage(inventoryMessage, data.message || `Could not save changes for ${equipmentId}.`, 'error');
+      showToast(data.message || `Could not save ${field} for ${equipmentId}.`, 'error');
       return;
     }
 
-    setMessage(inventoryMessage, 'Saved.', 'success');
+    // An edited equipmentId means the drawer is now looking at a record
+    // under a different key.
+    if (field === 'equipmentId' && openDrawerId === equipmentId) openDrawerId = newValue;
+    showToast(`Saved ${field} for ${equipmentId}.`, 'success');
     await loadInventory();
   } catch (err) {
     input.value = input.dataset.original;
     input.disabled = false;
     flashCommentInput(input, false);
-    setMessage(inventoryMessage, 'Could not reach the server.', 'error');
+    showToast('Could not reach the server.', 'error');
   }
 }
 
 function flashCommentInput(input, success) {
   input.classList.remove('comment-saved', 'comment-error');
-  void input.offsetWidth; // restart CSS transition if it's already mid-flash
+  void input.offsetWidth; // restart the CSS animation if it's already mid-flash
   input.classList.add(success ? 'comment-saved' : 'comment-error');
-  setTimeout(() => input.classList.remove('comment-saved', 'comment-error'), 1200);
+  setTimeout(() => input.classList.remove('comment-saved', 'comment-error'), 1300);
 }
 
-// Shared handler for both the Comment and Additional Information columns -
-// which field and API endpoint to use come from the input's data attributes.
+// Comment and Additional Information - open to every user, and saved in
+// place without reloading the grid, so editing several in a row is quick.
 async function saveEditableField(input) {
   const newValue = input.value.trim();
   if (newValue === input.dataset.original) return; // unchanged, nothing to save
@@ -2273,7 +2779,6 @@ async function saveEditableField(input) {
   const field = input.dataset.field;
   const endpoint = input.dataset.endpoint;
   input.disabled = true;
-  setMessage(inventoryMessage, '', null);
 
   try {
     const res = await fetch(`/api/equipment/${encodeURIComponent(equipmentId)}/${endpoint}`, {
@@ -2287,25 +2792,34 @@ async function saveEditableField(input) {
       input.value = input.dataset.original;
       flashCommentInput(input, false);
       const match = inventoryItems.find((it) => it.equipmentId === equipmentId);
-      const label = isAdmin ? equipmentId : match ? `"${match.item}"` : 'that item';
-      setMessage(inventoryMessage, data.message || `Could not save changes for ${label}.`, 'error');
+      showToast(data.message || `Could not save changes for ${match ? match.item : equipmentId}.`, 'error');
     } else {
       input.dataset.original = data[field];
       input.value = data[field];
       flashCommentInput(input, true);
+      // Keep the in-memory copy in step so the drawer, the grid and any
+      // other view of this field agree without a full reload.
       const match = inventoryItems.find((it) => it.equipmentId === equipmentId);
       if (match) match[field] = data[field];
+      document
+        .querySelectorAll(`.comment-input[data-equipment-id="${CSS.escape(equipmentId)}"][data-field="${field}"]`)
+        .forEach((other) => {
+          if (other !== input) {
+            other.value = data[field];
+            other.dataset.original = data[field];
+          }
+        });
     }
   } catch (err) {
     input.value = input.dataset.original;
     flashCommentInput(input, false);
-    setMessage(inventoryMessage, 'Could not reach the server.', 'error');
+    showToast('Could not reach the server.', 'error');
   } finally {
     input.disabled = false;
   }
 }
 
-// Load inventory once on first page load too, so switching tabs feels instant.
+// Load once on first page load too, so switching tabs feels instant.
 loadInventory();
 loadMyItems();
 

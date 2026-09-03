@@ -9,12 +9,16 @@
 <body>
   <header class="topbar">
     <div class="topbar-brand">
-      <img class="topbar-logo topbar-logo-icon" src="assets/logos/icon-only-white.png" alt="ITEMHOUND">
+      <img class="topbar-logo" src="assets/logos/wordmark-only-white.png" alt="ITEMHOUND">
+      <span class="topbar-divider" aria-hidden="true"></span>
       <h1>Equipment Inventory</h1>
     </div>
     <div class="user-info">
       <span id="adminBadge" class="admin-badge hidden">ADMIN</span>
-      <span id="welcomeText"></span>
+      <span class="user-identity">
+        <span class="user-name" id="welcomeName"></span>
+        <span class="user-id" id="welcomeId"></span>
+      </span>
       <button id="returnToHubBtn" type="button">Return to Hub</button>
     </div>
   </header>
@@ -30,42 +34,41 @@
     <button class="tab-btn" data-tab="request" type="button">Borrow / Reserve</button>
     <button class="tab-btn" data-tab="return" type="button">Return</button>
     <button class="tab-btn" data-tab="inventory" type="button">View Inventory</button>
+    <span class="tab-indicator" id="tabIndicator" aria-hidden="true"></span>
   </nav>
 
   <main>
     <!-- ============ MY ITEMS (HOME) TAB ============ -->
     <section id="home" class="tab-panel active">
-      <h2>My Items</h2>
-      <div class="action-row">
-        <button id="refreshHomeBtn" type="button" class="secondary-btn">Refresh</button>
+      <div class="page-head">
+        <div>
+          <h2>My Items</h2>
+          <p class="page-sub" id="homeViewingLabel">Everything you currently have reserved or checked out.</p>
+        </div>
+        <div class="page-actions">
+          <div id="homeAdminRow" class="input-row admin-only hidden">
+            <input type="text" id="homeViewIdInput" placeholder="Employee ID to view (Admin only)">
+            <button id="homeViewIdBtn" type="button" class="secondary-btn">View</button>
+          </div>
+          <button id="refreshHomeBtn" type="button" class="secondary-btn">Refresh</button>
+        </div>
       </div>
-      <div id="homeAdminRow" class="input-row admin-only hidden">
-        <input type="text" id="homeViewIdInput" placeholder="Employee ID to view (Admin only)">
-        <button id="homeViewIdBtn" type="button" class="secondary-btn">View</button>
-      </div>
-      <p id="homeViewingLabel" class="scanner-hint admin-only hidden"></p>
+
+      <div class="stat-tiles" id="homeStats"></div>
       <p id="homeMessage" class="message"></p>
-      <table class="cart-table">
-        <thead>
-          <tr>
-            <th>Equipment ID</th>
-            <th>Item</th>
-            <th>Status</th>
-            <th>Schedule</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="homeBody">
-          <tr class="empty-row"><td colspan="5">Loading your items…</td></tr>
-        </tbody>
-      </table>
+      <div class="event-cards" id="homeEvents"></div>
     </section>
 
     <!-- ============ BORROW / RESERVE TAB ============ -->
     <!-- One tab, two steps. Step 2 stays locked until step 1 is complete -
          see the requestStep gate in dashboard.js. -->
     <section id="request" class="tab-panel">
-      <h2>Borrow / Reserve Equipment</h2>
+      <div class="page-head">
+        <div>
+          <h2>Borrow / Reserve</h2>
+          <p class="page-sub">Create an event, then pick the equipment it needs.</p>
+        </div>
+      </div>
 
       <ol class="stepper" id="requestStepper">
         <li class="stepper-step is-current" data-step="1">
@@ -196,7 +199,12 @@
 
     <!-- ============ RETURN TAB ============ -->
     <section id="return" class="tab-panel">
-      <h2>Return Equipment</h2>
+      <div class="page-head">
+        <div>
+          <h2>Return</h2>
+          <p class="page-sub">Scan each item's barcode to send it back to the shelf.</p>
+        </div>
+      </div>
 
       <div class="input-row">
         <input type="text" id="returnInput" placeholder="Scan barcode to return">
@@ -224,63 +232,100 @@
     </section>
 
     <!-- ============ VIEW INVENTORY TAB ============ -->
+    <!-- The wide 10-column table this replaced tried to show every field at
+         once. Now the grid carries what you scan for and the detail drawer
+         (opened by clicking a row) carries the rest, including every
+         admin-editable field. -->
     <section id="inventory" class="tab-panel">
-      <h2>View Inventory</h2>
-      <div class="action-row">
-        <button id="refreshInventoryBtn" type="button" class="secondary-btn">Refresh</button>
-        <button id="clearFiltersBtn" type="button" class="secondary-btn">Clear Filters</button>
-        <button id="importCsvBtn" type="button" class="secondary-btn admin-only hidden">Import CSV</button>
-        <input type="file" id="importCsvFile" accept=".csv" class="hidden">
+      <div class="page-head">
+        <div>
+          <h2>Inventory</h2>
+          <p class="page-sub" id="inventorySubtitle">Every piece of equipment and who has it.</p>
+        </div>
+        <div class="page-actions">
+          <button id="importCsvBtn" type="button" class="secondary-btn admin-only hidden">Import CSV</button>
+          <input type="file" id="importCsvFile" accept=".csv" class="hidden">
+          <button id="refreshInventoryBtn" type="button" class="secondary-btn">Refresh</button>
+        </div>
       </div>
+
+      <div class="grid-toolbar">
+        <label class="search-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7 14 5 12 5 9.5S7 5 9.5 5 14 7 14 9.5 12 14 9.5 14z"/></svg>
+          <input type="search" id="inventorySearch" placeholder="Search by ID, item, team, category, holder or event…" autocomplete="off">
+          <button type="button" class="search-clear hidden" id="inventorySearchClear" aria-label="Clear search">&times;</button>
+        </label>
+
+        <div class="filter-chips">
+          <select class="col-filter" data-col="team" aria-label="Filter by team">
+            <option value="">All teams</option>
+            <option value="entractiv">Entractiv</option>
+            <option value="timing">Timing</option>
+            <option value="__unassigned__">Unassigned</option>
+          </select>
+          <select class="col-filter" data-col="status" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="available">Available</option>
+            <option value="unavailable">Unavailable</option>
+            <option value="reserved">Reserved</option>
+          </select>
+          <select class="col-filter" data-col="category" id="categoryFilter" aria-label="Filter by category">
+            <option value="">All categories</option>
+          </select>
+          <button id="clearFiltersBtn" type="button" class="secondary-btn">Clear</button>
+        </div>
+
+        <div class="toolbar-right">
+          <span class="result-count" id="inventoryCount"></span>
+          <div class="segmented" id="densityToggle" role="group" aria-label="Row density">
+            <button type="button" data-density="comfortable" class="active">Comfortable</button>
+            <button type="button" data-density="compact">Compact</button>
+          </div>
+        </div>
+      </div>
+
       <p id="inventoryMessage" class="message"></p>
       <p id="importResultMessage" class="message admin-only hidden"></p>
-      <table class="cart-table">
-        <thead>
-          <tr>
-            <th>Equipment ID</th>
-            <th>Item</th>
-            <th>Team</th>
-            <th>Status</th>
-            <th>Comment</th>
-            <th>Additional Information</th>
-            <th>Borrowed By</th>
-            <th>Event</th>
-            <th>Last Person Borrowed</th>
-            <th>Last Date Borrowed</th>
-          </tr>
-          <tr class="filter-row">
-            <th><input type="text" class="col-filter" data-col="equipmentId" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="item" placeholder="Filter…"></th>
-            <th>
-              <select class="col-filter" data-col="team">
-                <option value="">All</option>
-                <option value="entractiv">Entractiv</option>
-                <option value="timing">Timing</option>
-                <option value="__unassigned__">Unassigned</option>
-              </select>
-            </th>
-            <th>
-              <select class="col-filter" data-col="status">
-                <option value="">All</option>
-                <option value="Available">Available</option>
-                <option value="Unavailable">Unavailable</option>
-                <option value="Reserved">Reserved</option>
-              </select>
-            </th>
-            <th><input type="text" class="col-filter" data-col="comment" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="additionalInfo" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="borrower" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="event" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="lastBorrowedByName" placeholder="Filter…"></th>
-            <th><input type="text" class="col-filter" data-col="lastBorrowedAt" placeholder="Filter…"></th>
-          </tr>
-        </thead>
-        <tbody id="inventoryBody">
-          <tr class="empty-row"><td colspan="10">Loading inventory…</td></tr>
-        </tbody>
-      </table>
+
+      <div class="data-grid-wrap">
+        <table class="data-grid" id="inventoryGrid">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="item">Equipment <span class="sort-caret">&#9650;</span></th>
+              <th class="sortable" data-sort="team">Team <span class="sort-caret">&#9650;</span></th>
+              <th class="sortable" data-sort="category">Category <span class="sort-caret">&#9650;</span></th>
+              <th class="sortable" data-sort="status">Status <span class="sort-caret">&#9650;</span></th>
+              <th class="sortable" data-sort="holder">Assigned To <span class="sort-caret">&#9650;</span></th>
+              <th>Comment</th>
+              <th aria-label="Open details"></th>
+            </tr>
+          </thead>
+          <tbody id="inventoryBody"></tbody>
+        </table>
+      </div>
     </section>
+
   </main>
+
+  <!-- ============ INVENTORY DETAIL DRAWER ============ -->
+  <div id="detailDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <div class="drawer-backdrop" data-drawer-close></div>
+    <aside class="drawer-panel">
+      <header class="drawer-head">
+        <div>
+          <h3 id="drawerTitle"></h3>
+          <div class="drawer-sub" id="drawerSub"></div>
+        </div>
+        <button type="button" class="icon-btn drawer-close" data-drawer-close aria-label="Close details">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </header>
+      <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+  </div>
+
+  <!-- ============ TOASTS ============ -->
+  <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
 
   <!-- ============ CONFIRMATION MODAL ============ -->
   <div id="confirmModal" class="scanner-modal hidden">

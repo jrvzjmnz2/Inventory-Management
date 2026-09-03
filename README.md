@@ -8,6 +8,13 @@ tracking office equipment: who has what, borrowing, and returning.
 - **No login of its own** — sign-in happens entirely at the AI Hub, with Microsoft
   (see "Single sign-on with the AI Hub" below). This app has no login or registration
   page anymore; opening it without a session redirects to the Hub.
+- **My Items tab** — a summary strip (Checked out / On hold / Upcoming / Needs
+  attention, with an overdue count) over one **card per event**. Each card carries the
+  event's type, its date range, how its items are split between checked out, on hold
+  and upcoming, and the bulk actions that apply to it (Borrow All, Change Date, Remove
+  All, Export List). Items sit inside as rows with their own status, due date and
+  actions; anything overdue or due soon gets an inline warning and marks its card.
+  Returning an item is still barcode-verified from its own row.
 - **Borrow / Reserve tab** — one tab, two steps. Step 2 is locked until step 1 is
   complete, so an event always exists before any equipment is picked.
 
@@ -44,10 +51,20 @@ tracking office equipment: who has what, borrowing, and returning.
   and clears the Event Type. An item returned while still inside an active reservation
   window goes back to `Reserved` instead, so nobody else can grab it out from under
   that hold.
-- **View Inventory tab** — a live table of every piece of equipment: ID, item, **team**,
-  status, an **editable Comment field** (click in, edit, then press Enter or click away
-  to save), current borrower, and event. Admin can edit any cell here, including
-  assigning an item's Team from a dropdown.
+- **View Inventory tab** — a data grid rather than a wall of columns. A single search
+  box covers ID, item, team, category, holder, event, comment and location; filter
+  chips narrow by team, status and category (the category list is built from the data,
+  so a new category appears on its own); every column sorts (ascending → descending →
+  back to the default order); and a density toggle switches between comfortable and
+  compact rows, remembered per browser.
+
+  The grid shows what you scan for — equipment, team, category, status, who has it and
+  for which event, plus an inline-editable **Comment**. Everything else lives in a
+  **detail drawer** that opens when you click a row: the full assignment, dates, notes,
+  and borrow history. Comment and Additional Information stay editable for every user;
+  for Admin the drawer also carries every editable field (ID, item, team, category,
+  location, ports, status, assigned employee, event, hold end, and the two history
+  fields), each saving on Enter or blur with a toast confirming it.
 
 ## Data model
 
@@ -278,24 +295,47 @@ npm run dev
 
 ```
 inventory-management-system/
-├── server.js              Express app entry point, connects to MongoDB
-├── seed.js                 Populates sample employees + equipment
-├── db.js                    Shared MongoClient connection + index setup
-├── constants.js              Collection names, Event-type/Team/Misc-item option lists
+├── server.js               Express app entry point, SSO hand-off, connects to MongoDB
+├── seed.js                  Populates sample employees + equipment
+├── db.js                     Shared MongoClient connection + index setup
+├── constants.js               Collection names, Event-type/Team/Misc-item option lists
+├── middleware/auth.js          Session cookie: sign, verify, page + API guards
+├── utils/                       status.js (reservation state), csv.js, ssoToken.js
+├── scripts/
+│   ├── backfill-team.js          One-off: give every equipment doc a team field
+│   ├── migrate-database.js        One-off: copy collections between clusters
+│   └── sync-mobile-css.js          Copies public/css/style.css into public/mobile/
 ├── routes/
-│   ├── equipment.js           /api/equipment, /api/equipment/:id
-│   ├── borrow.js               /api/borrow/complete, /api/borrow/misc-items
-│   ├── return.js                /api/return/complete
-│   └── export.js                 /api/export/:employeeId (generates .docx)
+│   ├── equipment.js               /api/equipment (+ /:id, /:id/field, /import, /meta/*)
+│   ├── borrow.js                   /api/borrow/complete, /api/borrow/misc-items
+│   ├── reserve.js                   /api/reserve/complete, /cancel, /reschedule
+│   ├── return.js                     /api/return/complete
+│   └── export.js                      /api/export/:employeeId (generates .docx)
 └── public/
-    ├── index.html            Login page
-    ├── dashboard.html         Borrow / Return / View Inventory tabs
-    ├── css/style.css
-    ├── js/
-    │   ├── login.js
-    │   └── dashboard.js
-    └── mobile/                Mobile web app (same backend, own frontend)
+    ├── dashboard.html                My Items / Borrow-Reserve / Return / Inventory
+    ├── css/style.css                  Design system + all four tabs
+    ├── js/dashboard.js                 One script, one section per tab
+    ├── assets/logos/                    ITEMHOUND wordmark + icon marks
+    └── mobile/                           Mobile web app (same backend, own frontend)
 ```
+
+## Interface
+
+The dashboard follows the ITEMHOUND brand guidelines: deep maroon (`#630A1F`) and dark
+slate (`#25363E`) dominate, light gray (`#D9D9D9`) and white support them, the base
+surface stays plain white, headlines are Inter and body copy is Nunito Sans. The topbar
+carries the **wordmark** lockup — the guideline-sanctioned choice for a width-constrained
+horizontal placement (the icon-only mark is reserved for app icons and favicons).
+
+Two colors sit outside the brand palette on purpose: the semantic status set
+(available / unavailable / reserved / overdue). Equipment state has to be
+distinguishable at a glance and the four brand colors can't carry that on their own, so
+they're used only for status pills, badges and alerts — never decoratively.
+
+`public/css/style.css` opens with the design tokens everything else is built from
+(palette, spacing, radii, elevation, motion durations and easing). Animation is
+decoration only — nothing is communicated by motion alone — so a single
+`prefers-reduced-motion` block at the end of the file switches all of it off.
 
 ## Mobile app
 
