@@ -404,122 +404,9 @@ main {
   margin-bottom: 0.75rem;
 }
 
-/* ---------- Keyword suggestion dropdown (Borrow & Reserve only) ---------- */
-
-.input-with-suggest {
-  position: relative;
-  flex: 1;
-  min-width: 200px;
-}
-
-.input-with-suggest input[type="text"] {
-  width: 100%;
-  min-width: 0;
-}
-
-.suggest-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--shadow-md);
-  max-height: 260px;
-  overflow-y: auto;
-  z-index: 150;
-}
-
-.suggest-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.55rem 0.8rem;
-  cursor: pointer;
-  font-size: 0.88rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.suggest-item:last-child {
-  border-bottom: none;
-}
-
-.suggest-item:hover,
-.suggest-item.active {
-  background: var(--surface-soft);
-}
-
-.suggest-main {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.suggest-id {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.suggest-name {
-  color: var(--ink-soft);
-  margin-left: 0.4rem;
-}
-
-/* Availability badge shown per suggestion row (see suggestAvailability in
-   dashboard.js) - color-codes whether picking that row will actually work. */
-.suggest-status {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.suggest-available {
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-.suggest-upcoming,
-.suggest-reserved-mine {
-  background: var(--warning-bg);
-  color: var(--amber-dark);
-}
-
-.suggest-reserved,
-.suggest-unavailable {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-/* Blocked rows (Unavailable, or actively Reserved by someone else) are still
-   shown for context, but clicking/selecting them does nothing - so they look
-   inert rather than inviting a click. */
-.suggest-item-blocked {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.suggest-item-blocked:hover {
-  background: transparent;
-}
-
-.suggest-empty {
-  padding: 0.6rem 0.8rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  font-style: italic;
-}
-
 .input-row input[type="text"],
-.input-row input[type="date"] {
+.input-row input[type="date"],
+.input-row input[type="time"] {
   flex: 1;
   min-width: 200px;
   padding: 0.6rem 0.75rem;
@@ -532,7 +419,8 @@ main {
 }
 
 .input-row input[type="text"]:focus,
-.input-row input[type="date"]:focus {
+.input-row input[type="date"]:focus,
+.input-row input[type="time"]:focus {
   border-color: var(--amber);
   box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.14);
 }
@@ -556,8 +444,7 @@ main {
 }
 
 button.primary-btn,
-.input-row > button:first-of-type,
-#borrowAddBtn,
+.input-row > button:first-of-type:not(.scan-btn),
 #returnAddBtn {
   background: var(--ink);
   color: #fff;
@@ -570,7 +457,6 @@ button.primary-btn,
 }
 
 button.primary-btn:hover,
-#borrowAddBtn:hover,
 #returnAddBtn:hover {
   background: var(--amber-dark);
   transform: translateY(-1px);
@@ -1120,4 +1006,676 @@ select.comment-input {
   .topbar { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
   .tabs { overflow-x: auto; }
   .cart-table { font-size: 0.82rem; }
+}
+
+.pending-banner {
+  background: var(--warning-bg);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 20px;
+  font-size: 13.5px;
+  text-align: center;
+}
+
+/* =========================================================
+   BORROW / RESERVE TAB
+   ========================================================= */
+
+/* ---------- Step indicator ---------- */
+/* Two steps, and step 2 is genuinely locked (not just visually) until step
+   1 produces an event - see goToStep() in dashboard.js. is-locked is what
+   says so; the click handler is what enforces it. */
+.stepper {
+  display: flex;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.stepper-step {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stepper-step:hover:not(.is-locked) {
+  border-color: var(--teal);
+}
+
+.stepper-step.is-current {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.12);
+}
+
+.stepper-step.is-locked {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--surface-soft);
+}
+
+.stepper-num {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.stepper-step.is-current .stepper-num {
+  background: var(--amber);
+  color: #fff;
+}
+
+.stepper-step.is-done .stepper-num {
+  background: var(--teal);
+  color: #fff;
+}
+
+.stepper-label {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.92rem;
+  line-height: 1.3;
+}
+
+.stepper-label small {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.step-panel { display: none; }
+.step-panel.active {
+  display: block;
+  animation: tabFadeIn 0.25s ease-out both;
+}
+
+/* ---------- Step 1: event form ---------- */
+
+.form-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--teal);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.form-card h3 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.field {
+  display: block;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 0.35rem;
+}
+
+.field input[type="text"],
+.field-select {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  background: var(--surface);
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field input[type="text"]:focus,
+.field-select:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.14);
+}
+
+/* Borrow vs Reserve: big clickable cards rather than bare radios, since
+   picking one is what decides which dates get asked for below. */
+.mode-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mode-option:hover {
+  border-color: var(--teal);
+}
+
+.mode-option.is-chosen {
+  border-color: var(--amber);
+  background: rgba(99, 10, 31, 0.05);
+  box-shadow: 0 0 0 3px rgba(99, 10, 31, 0.1);
+}
+
+.mode-option input[type="radio"] {
+  margin-top: 0.2rem;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--amber);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.mode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.mode-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.mode-hint {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.schedule-block {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--line);
+}
+
+.schedule-block .input-row {
+  margin-bottom: 0;
+}
+
+/* Borrow's start isn't picked - it's whenever Complete is pressed - so it's
+   shown as read-only text rather than a disabled date input, which would
+   look editable-but-broken. */
+.schedule-now {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-soft);
+  border-radius: 10px;
+}
+
+.schedule-now-value {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.schedule-now-note {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- Step 2: event summary bar ---------- */
+
+.event-summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.event-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.event-summary-mode {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--amber);
+}
+
+.event-summary-mode.mode-reserve {
+  background: var(--teal);
+}
+
+.event-summary-name {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+}
+
+.event-summary-type {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.event-summary-dates {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.event-summary .secondary-btn {
+  margin-left: auto;
+}
+
+/* ---------- Step 2: team accordion ---------- */
+
+.team-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.team-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.team-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.95rem 1.1rem;
+  background: var(--surface-soft);
+  border: none;
+  text-align: left;
+  font-family: var(--font-display);
+}
+
+.team-toggle:hover {
+  background: rgba(99, 10, 31, 0.07);
+}
+
+.team-caret {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--ink-soft);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+.team-group.is-open .team-caret {
+  transform: rotate(90deg);
+}
+
+.team-name {
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+
+.team-meta {
+  margin-left: auto;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.team-body {
+  padding: 1rem 1.1rem 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- Step 2: category tabs ---------- */
+
+.category-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.cat-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.cat-tab:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.cat-tab.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.cat-count {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.cat-tab.active .cat-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* ---------- Step 2: per-category item cards ---------- */
+
+.pick-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.pick-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.pick-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.75rem 0.95rem;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.pick-card-head h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.pick-card-meta {
+  margin-left: auto;
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.pick-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.pick-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.65rem 0.95rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pick-row:last-child {
+  border-bottom: none;
+}
+
+.pick-row:hover {
+  background: rgba(99, 10, 31, 0.05);
+}
+
+.pick-row input[type="checkbox"] {
+  margin-top: 0.15rem;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--amber);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.pick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.pick-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.pick-id {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.pick-note {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.pick-state {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  text-align: right;
+  flex: 0 0 auto;
+  max-width: 45%;
+}
+
+.pick-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pick-badge.pick-available {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.pick-badge.pick-mine,
+.pick-badge.pick-upcoming {
+  background: var(--warning-bg);
+  color: var(--amber-dark);
+}
+
+.pick-badge.pick-reserved,
+.pick-badge.pick-unavailable {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* The event name and dates already on an item - the whole point of showing
+   held rows here instead of hiding them. */
+.pick-hold {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.pick-hold-event {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* An item that's already borrowed or reserved stays visible and keeps its
+   checkbox, but the row is tinted and the box is inert - so it reads as
+   "spoken for", not "missing". */
+.pick-row.is-held {
+  background: var(--warning-bg);
+}
+
+.pick-row.is-blocked {
+  cursor: not-allowed;
+}
+
+.pick-row.is-blocked .pick-name {
+  color: var(--ink-soft);
+}
+
+.pick-row.is-blocked input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
+.pick-row.is-blocked:hover {
+  background: var(--warning-bg);
+}
+
+.pick-row.is-selected {
+  background: rgba(30, 122, 67, 0.12);
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+.pick-row.is-selected:hover {
+  background: rgba(30, 122, 67, 0.18);
+}
+
+/* ---------- Step 2: cart ---------- */
+
+.request-cart {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.request-cart-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.request-cart-head .remove-btn {
+  margin-left: auto;
+}
+
+.request-cart-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.request-cart-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.request-cart-list li:last-child {
+  border-bottom: none;
+}
+
+.request-cart-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.request-cart-meta {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.request-cart-list .remove-btn {
+  margin-left: auto;
+}
+
+.empty-note {
+  margin: 0;
+  padding: 0.6rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 640px) {
+  .pick-cards { grid-template-columns: 1fr; }
+  .pick-state { max-width: none; }
+  .event-summary .secondary-btn { margin-left: 0; }
 }

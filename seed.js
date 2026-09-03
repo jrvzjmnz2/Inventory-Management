@@ -1,5 +1,4 @@
 require('dotenv').config();
-const bcrypt = require('bcryptjs');
 const { MongoClient } = require('mongodb');
 const { COLLECTIONS } = require('./constants');
 
@@ -40,10 +39,13 @@ async function seed() {
   await equipment.deleteMany({});
 
   const now = new Date();
+  // No passwords - sign-in is Microsoft-only at the AI Hub now, so a
+  // hashed password on a seeded employee wouldn't let anyone in. These
+  // exist purely so borrow/reserve flows have employeeIds to point at.
   const employeeDocs = [
-    { employeeId: 'EMP001', name: 'Juan Dela Cruz', password: await bcrypt.hash('password123', 10), createdAt: now, updatedAt: now },
-    { employeeId: 'EMP002', name: 'Maria Santos', password: await bcrypt.hash('password123', 10), createdAt: now, updatedAt: now },
-    { employeeId: 'EMP003', name: 'Pedro Reyes', password: await bcrypt.hash('password123', 10), createdAt: now, updatedAt: now }
+    { employeeId: 'EMP001', name: 'Juan Dela Cruz', createdAt: now, updatedAt: now },
+    { employeeId: 'EMP002', name: 'Maria Santos', createdAt: now, updatedAt: now },
+    { employeeId: 'EMP003', name: 'Pedro Reyes', createdAt: now, updatedAt: now }
   ];
   await employees.insertMany(employeeDocs);
 
@@ -63,8 +65,9 @@ async function seed() {
   await equipment.insertMany(equipmentDocs);
 
   console.log('Seeding complete.');
-  console.log('Sample login credentials:');
-  employeeDocs.forEach((e) => console.log(`  Employee ID: ${e.employeeId}  Password: password123`));
+  console.log('Sample employee IDs (sign in with Microsoft at the AI Hub - these are just');
+  console.log('records to borrow/reserve against, they are not sign-in accounts):');
+  employeeDocs.forEach((e) => console.log(`  Employee ID: ${e.employeeId}  (${e.name})`));
 
   await client.close();
   process.exit(0);

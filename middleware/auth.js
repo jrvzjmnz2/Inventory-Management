@@ -15,9 +15,11 @@ if (!SESSION_SECRET) {
 }
 
 function signSession(employee) {
-  return jwt.sign({ employeeId: employee.employeeId, name: employee.name }, SESSION_SECRET, {
-    expiresIn: SESSION_TTL,
-  });
+  return jwt.sign(
+    { employeeId: employee.employeeId ?? null, name: employee.name, email: employee.email },
+    SESSION_SECRET,
+    { expiresIn: SESSION_TTL }
+  );
 }
 
 function setSessionCookie(res, employee) {
@@ -43,14 +45,14 @@ function clearSessionCookie(res) {
   });
 }
 
-// Reads and verifies the cookie, returns the {employeeId, name} payload or
-// null - never throws, so callers can just check truthiness.
+// Reads and verifies the cookie, returns the {employeeId, name, email}
+// payload or null - never throws, so callers can just check truthiness.
 function readSession(req) {
   const token = req.cookies && req.cookies[SESSION_COOKIE];
   if (!token) return null;
   try {
     const payload = jwt.verify(token, SESSION_SECRET);
-    return { employeeId: payload.employeeId, name: payload.name };
+    return { employeeId: payload.employeeId ?? null, name: payload.name, email: payload.email };
   } catch {
     return null;
   }
@@ -81,10 +83,20 @@ function requirePageSession(req, res, next) {
 // Re-confirms the employee referenced by the session still exists (covers
 // an account deleted after the cookie was issued). Used only on the page
 // routes, where an extra DB round trip once per navigation is cheap.
+//
+// A Microsoft sign-in with no employeeId tagged yet has no reliable
+// employeeId to look up - querying { employeeId: null } would just match
+// whichever untagged employee document Mongo happens to return first, not
+// necessarily this one. Falling back to a lookup by email (always present
+// for a Microsoft-created account) makes this check meaningful again for
+// that case, rather than silently passing for the wrong reason.
 async function requireLiveEmployee(req, res, next) {
   try {
     const employees = getDb().collection(COLLECTIONS.EMPLOYEES);
-    const exists = await employees.findOne({ employeeId: req.employee.employeeId }, { projection: { _id: 1 } });
+    const query = req.employee.employeeId != null
+      ? { employeeId: req.employee.employeeId }
+      : { email: req.employee.email };
+    const exists = await employees.findOne(query, { projection: { _id: 1 } });
     if (!exists) {
       clearSessionCookie(res);
       const hubUrl = process.env.HUB_URL || 'http://localhost:5173';

@@ -7,7 +7,18 @@ const COLLECTIONS = {
   MISC_LOGS: 'misclogs'
 };
 
-const PURPOSE_OPTIONS = ['Entractiv', 'Fulfillment', 'Timing', 'Bib Production', 'Office & Admin', 'Kit Claiming'];
+// What kind of event the equipment is going out for - picked in step 1 of
+// the merged Borrow/Reserve tab, and stored on every item in that request.
+// Still written to the equipment document's `purpose` field, which is what
+// this list used to be called (and what the Word export reads), so no data
+// migration was needed when the option list changed to these five.
+const EVENT_TYPE_OPTIONS = ['Kit Claiming', 'Entractiv', 'Timing', 'Fulfillment', 'Admin'];
+
+// Which team an item belongs to (equipment.team). Step 2 of the Borrow/
+// Reserve tab groups the whole inventory under these, so an item with a
+// blank/missing team is grouped under "Unassigned" client-side rather than
+// disappearing from the picker - see scripts/backfill-team.js.
+const TEAM_OPTIONS = ['Entractiv', 'Timing'];
 
 const MISC_ITEMS = [
   'Masking Tape',
@@ -43,7 +54,8 @@ const EQUIPMENT_ADMIN_EDITABLE_FIELDS = [
   'reservedUntil',
   'ports',
   'location',
-  'category'
+  'category',
+  'team'
 ];
 
 // Columns required in an admin CSV import - a file missing any of these is
@@ -53,11 +65,12 @@ const CSV_IMPORT_COLUMNS = ['additionalInfo', 'comment', 'employeeId', 'equipmen
 // Extra columns an admin CSV import will recognize and store if present, but
 // won't reject the file for lacking - older CSV files without them still
 // import fine, just leaving these fields blank.
-const CSV_IMPORT_OPTIONAL_COLUMNS = ['ports', 'location', 'category'];
+const CSV_IMPORT_OPTIONAL_COLUMNS = ['ports', 'location', 'category', 'team'];
 
 module.exports = {
   COLLECTIONS,
-  PURPOSE_OPTIONS,
+  EVENT_TYPE_OPTIONS,
+  TEAM_OPTIONS,
   MISC_ITEMS,
   ADMIN_EMPLOYEE_ID,
   EQUIPMENT_STATUS_OPTIONS,

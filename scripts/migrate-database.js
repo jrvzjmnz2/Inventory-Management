@@ -97,7 +97,14 @@ async function migrate() {
   // migrated data is protected immediately rather than waiting for the next
   // `npm start`.
   try {
-    await targetDb.collection(COLLECTIONS.EMPLOYEES).createIndex({ employeeId: 1 }, { unique: true });
+    // Partial, not plain, unique - see the matching comment in db.js. Lets
+    // any number of not-yet-tagged Microsoft sign-in accounts (no
+    // employeeId set) coexist without tripping the uniqueness check.
+    await targetDb.collection(COLLECTIONS.EMPLOYEES).createIndex(
+      { employeeId: 1 },
+      { unique: true, partialFilterExpression: { employeeId: { $type: 'string' } }, name: 'employeeId_1' }
+    );
+    await targetDb.collection(COLLECTIONS.EMPLOYEES).createIndex({ email: 1 }, { unique: true, sparse: true });
     await targetDb.collection(COLLECTIONS.EQUIPMENT).createIndex({ equipmentId: 1 }, { unique: true });
   } catch (err) {
     console.warn('Could not (re)create unique indexes on the target - check for duplicate IDs:', err.message);

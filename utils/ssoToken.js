@@ -15,7 +15,7 @@ function verifySsoToken(token) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, SSO_SHARED_SECRET, { audience: 'inventory' });
-    return { employeeId: payload.employeeId, name: payload.name };
+    return { employeeId: payload.employeeId ?? null, name: payload.name, email: payload.email };
   } catch {
     return null;
   }

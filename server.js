@@ -16,7 +16,6 @@ const {
   requireLiveEmployee,
 } = require('./middleware/auth');
 
-const authRoutes = require('./routes/auth');
 const equipmentRoutes = require('./routes/equipment');
 const borrowRoutes = require('./routes/borrow');
 const reserveRoutes = require('./routes/reserve');
@@ -74,8 +73,6 @@ app.get('/sso', (req, res) => {
   setSessionCookie(res, employee);
   res.redirect('/dashboard.html');
 });
-
-app.use('/api/auth', authRoutes);
 
 // Every other API route needs a real, verified session from here on -
 // previously these trusted whatever employeeId the request body claimed.

@@ -2,7 +2,8 @@ const express = require('express');
 const { getDb } = require('../db');
 const {
   COLLECTIONS,
-  PURPOSE_OPTIONS,
+  EVENT_TYPE_OPTIONS,
+  TEAM_OPTIONS,
   ADMIN_EMPLOYEE_ID,
   EQUIPMENT_STATUS_OPTIONS,
   EQUIPMENT_ADMIN_EDITABLE_FIELDS,
@@ -90,9 +91,16 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// GET /api/equipment/meta/purposes - the fixed list of borrow purpose options
-router.get('/meta/purposes', (req, res) => {
-  res.json(PURPOSE_OPTIONS);
+// GET /api/equipment/meta/event-types - the fixed list of event types picked
+// in step 1 of the Borrow/Reserve tab.
+router.get('/meta/event-types', (req, res) => {
+  res.json(EVENT_TYPE_OPTIONS);
+});
+
+// GET /api/equipment/meta/teams - the fixed list of teams equipment is
+// grouped under in step 2 of the Borrow/Reserve tab.
+router.get('/meta/teams', (req, res) => {
+  res.json(TEAM_OPTIONS);
 });
 
 // GET /api/equipment - full inventory list, used by the View Inventory tab.
@@ -130,6 +138,7 @@ router.get('/', async (req, res) => {
       ports: i.ports || '',
       location: i.location || '',
       category: i.category || '',
+      team: i.team || '',
       employeeId: i.employeeId || null,
       employeeName: i.employeeId ? nameByEmployeeId[i.employeeId] || 'Unknown' : null,
       purpose: i.purpose || null,
@@ -182,6 +191,7 @@ router.get('/:id', async (req, res) => {
       ports: item.ports || '',
       location: item.location || '',
       category: item.category || '',
+      team: item.team || '',
       employeeId: item.employeeId || null,
       employeeName,
       purpose: item.purpose || null,
@@ -338,6 +348,22 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
         toStore = raw || '';
         break;
       }
+      // Unlike the free-text fields above, team drives how step 2 of the
+      // Borrow/Reserve tab groups the inventory - a typo'd value would
+      // quietly strand the item in a group of its own, so only the fixed
+      // options (or blank, meaning "Unassigned") are accepted.
+      case 'team': {
+        if (!raw) {
+          toStore = '';
+        } else {
+          const match = TEAM_OPTIONS.find((opt) => opt.toLowerCase() === String(raw).toLowerCase());
+          if (!match) {
+            return res.status(400).json({ message: `Team must be one of: ${TEAM_OPTIONS.join(', ')}, or blank.` });
+          }
+          toStore = match;
+        }
+        break;
+      }
       case 'reservedUntil': {
         if (!raw) {
           toStore = null;
@@ -370,7 +396,7 @@ router.patch('/:id/field', requireAdmin, async (req, res) => {
 // POST /api/equipment/import - Admin-only CSV import. Body: { csv, requesterId }
 // Requires a header row containing (in any order): additionalInfo, comment,
 // employeeId, equipmentId, item, status. Also recognizes optional ports,
-// location, and category columns if present - a CSV missing those simply
+// location, category, and team columns if present - a CSV missing those simply
 // imports with those fields blank, so older files still work unchanged. Only
 // inserts equipmentIds that aren't already in the inventory - any
 // equipmentId that already exists is skipped (left untouched) rather than
@@ -453,6 +479,7 @@ router.post('/import', requireAdmin, async (req, res) => {
         ports: (row.ports || '').trim(),
         location: (row.location || '').trim(),
         category: (row.category || '').trim(),
+        team: (row.team || '').trim(),
         employeeId: (row.employeeId || '').trim() || null,
         purpose: null,
         event: null,

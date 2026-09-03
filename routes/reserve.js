@@ -1,6 +1,6 @@
 const express = require('express');
 const { getDb } = require('../db');
-const { COLLECTIONS, PURPOSE_OPTIONS, MISC_ITEMS } = require('../constants');
+const { COLLECTIONS, EVENT_TYPE_OPTIONS, MISC_ITEMS } = require('../constants');
 const {
   canonicalStatus,
   effectiveStatus,
@@ -56,11 +56,11 @@ router.post('/complete', async (req, res) => {
     if (equipmentIds.length === 0 && miscItems.length === 0) {
       return res.status(400).json({ message: 'Add at least one item to the cart before completing.' });
     }
-    if (equipmentIds.length > 0 && !PURPOSE_OPTIONS.includes(purpose)) {
-      return res.status(400).json({ message: 'Select a valid Purpose before completing the reservation.' });
+    if (equipmentIds.length > 0 && !EVENT_TYPE_OPTIONS.includes(purpose)) {
+      return res.status(400).json({ message: 'Select a valid Event Type before completing the reservation.' });
     }
     if (equipmentIds.length > 0 && !trimmedEvent) {
-      return res.status(400).json({ message: 'Enter an Event before completing the reservation.' });
+      return res.status(400).json({ message: 'Enter an Event Name before completing the reservation.' });
     }
     if (equipmentIds.length > 0 && (!start || !end)) {
       return res.status(400).json({ message: 'Select a start and end date/time before completing the reservation.' });

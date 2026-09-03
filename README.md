@@ -5,27 +5,49 @@ tracking office equipment: who has what, borrowing, and returning.
 
 ## Features
 
-- **Login page** — sign-in now happens at the AI Hub, not here (see "Single sign-on
-  with the AI Hub" below). This app still has its own `/api/auth/register` endpoint
-  for creating new employee accounts, at `public/register.html`.
-- **Borrow tab** — type an Equipment ID to add it to a cart. Items already borrowed by
-  someone else are rejected with the current borrower's name shown, so you can pick
-  another item. Below the equipment cart, a **Miscellaneous Items** checklist lists all
-  6 consumables (Masking Tape, Duct Tape, Zip Tie, Stickers, Printer Cable, HDMI Cable);
-  check the ones you're taking and use the +/- stepper to set the amount for each. A
-  **Purpose** dropdown (Entractiv, Fulfillment, Timing, Bib Production, Office & Admin,
-  Kit Claiming) is required before completing a borrow that includes equipment, and is
-  saved against every item in that transaction. Pressing **Complete** marks every
-  equipment item in the cart `Unavailable`, assigns it to the logged-in employee, and
-  records the chosen Purpose. **Export to Word** then downloads a `.docx` listing
-  everything currently borrowed by that employee (including Purpose), plus the
-  miscellaneous items just logged.
-- **Return tab** — type an Equipment ID to add it to a return cart. Pressing **Complete**
-  sets those items back to `Available`, clears the assigned Employee ID, and clears the
-  Purpose.
-- **View Inventory tab** — a live table of every piece of equipment: ID, item, status,
-  an **editable Comment field** (click in, edit, then press Enter or click away to save),
-  current borrower, and Purpose (if any).
+- **No login of its own** — sign-in happens entirely at the AI Hub, with Microsoft
+  (see "Single sign-on with the AI Hub" below). This app has no login or registration
+  page anymore; opening it without a session redirects to the Hub.
+- **Borrow / Reserve tab** — one tab, two steps. Step 2 is locked until step 1 is
+  complete, so an event always exists before any equipment is picked.
+
+  **Step 1 — create the event.** Enter an **Event Name** and pick an **Event Type**
+  (Kit Claiming, Entractiv, Timing, Fulfillment, Admin), then choose one of:
+  - **Borrow** — the start is fixed to the current date and time (shown, not editable);
+    you're only asked for the **Return Date / Event End**.
+  - **Reserve** — you're asked for both the **Start Date / Event Start** and the
+    **Return Date / Event End**.
+
+  Next stays disabled until all of that is valid (name, type, mode, dates in the
+  future, end after start — plus the on-behalf Employee ID for Admin). Clicking
+  step 2 in the stepper before then is refused with an explanation.
+
+  **Step 2 — select the equipment.** The whole inventory is grouped by the `team`
+  column into collapsible sections (`Entractiv`, `Timing`, and `Unassigned` for
+  anything not tagged yet). Expanding a team reveals **category tabs**; each category
+  is its own card listing that category's items with a checkbox. Ticking a box pools
+  the item into the cart shown at the bottom; **Complete** tags every pooled item to
+  the employee under the event from step 1.
+
+  Items that are already borrowed or reserved stay visible rather than being hidden:
+  the row is highlighted, its checkbox is inert, and it shows the **event name and
+  dates** of the hold that already has it, plus who holds it. What's selectable
+  differs by mode — a Borrow can take an item that merely has an upcoming (not yet
+  started) reservation, or one the borrower has reserved themselves; a Reserve can't.
+
+  A **Miscellaneous Items** checklist sits below the picker with the 8 consumables
+  (Masking Tape, Duct Tape, Zip Tie, Stickers, Printer Cable, HDMI Cable, DK-2205,
+  Scissors) and a +/- stepper for each. A filter box narrows the picker by ID, item
+  or category, and the barcode **Scan** button ticks the scanned item directly.
+- **Return tab** — type or scan an Equipment ID to add it to a return cart. Pressing
+  **Complete** sets those items back to `Available`, clears the assigned Employee ID,
+  and clears the Event Type. An item returned while still inside an active reservation
+  window goes back to `Reserved` instead, so nobody else can grab it out from under
+  that hold.
+- **View Inventory tab** — a live table of every piece of equipment: ID, item, **team**,
+  status, an **editable Comment field** (click in, edit, then press Enter or click away
+  to save), current borrower, and event. Admin can edit any cell here, including
+  assigning an item's Team from a dropdown.
 
 ## Data model
 
@@ -46,23 +68,63 @@ The core `equipment` collection has these fields:
 | status          | String  | `Available` or `Unavailable`                         |
 | comment         | String  | free text, e.g. specs/condition                      |
 | additionalInfo  | String  | free text, editable from the View Inventory tab      |
+| category        | String  | groups items into cards within a team, e.g. "Camera" |
+| team            | String  | `Entractiv`, `Timing`, or blank (shown "Unassigned") |
 | employeeId      | String  | current borrower's ID, or `null`                     |
-| purpose         | String  | one of the 6 fixed options below, or `null`          |
-| event           | String  | free text entered alongside Purpose, or `null`       |
+| purpose         | String  | the Event Type — one of the 5 options below, or `null` |
+| event           | String  | the Event Name entered alongside it, or `null`       |
 | lastBorrowedBy  | String  | ID of whoever last borrowed it (survives a return)   |
 | lastBorrowedAt  | Date    | when that last borrow happened (survives a return)   |
 
-Purpose options (chosen from a dropdown on the Borrow tab, required whenever
-equipment is included in a borrow transaction): `Entractiv`, `Fulfillment`,
-`Timing`, `Bib Production`, `Office & Admin`, `Kit Claiming`. Along with
-`employeeId` and `event`, it's cleared back to `null` whenever the item is
-returned — `lastBorrowedBy`/`lastBorrowedAt` are intentionally left alone so
-history isn't lost.
+Event Type options (step 1 of the Borrow/Reserve tab, required whenever equipment
+is included): `Kit Claiming`, `Entractiv`, `Timing`, `Fulfillment`, `Admin`. These
+are stored in the `purpose` field, which is what this list used to be called — the
+name was left alone so no data migration was needed and the Word export keeps
+working. Along with `employeeId` and `event`, it's cleared back to `null` whenever
+the item is returned — `lastBorrowedBy`/`lastBorrowedAt` are intentionally left
+alone so history isn't lost.
+
+`team` is what step 2 of the Borrow/Reserve tab groups the inventory by. Items
+without it are grouped under **Unassigned** rather than dropped from the picker, so
+nothing becomes un-borrowable just because it hasn't been tagged yet. Assign it from
+the View Inventory tab's Team column (Admin only), or via a CSV import that includes
+a `team` column. To give every existing document the field explicitly:
+
+```bash
+npm run backfill-team
+```
+
+That only touches documents missing the field — existing values are never
+overwritten — and prints a breakdown by team when it's done.
 
 Two supporting collections make the app work end-to-end without adding columns
 to the table above:
-- `employees` — employeeId, name, hashed password (used for login only).
+- `employees` — see below; the shared identity store the AI Hub also writes to.
 - `misclogs` — records of miscellaneous items borrowed, used for the Word export.
+
+`employees` documents now come from two different eras and can have different shapes:
+
+| Field          | Type   | Notes                                                                 |
+|----------------|--------|------------------------------------------------------------------------|
+| employeeId     | String | this system's own business ID - unique among documents that HAVE one (see below). Used everywhere as the "who is this" identity key (borrowing, reserving, the Admin check). |
+| name           | String | display name.                                                          |
+| email          | String | set on Microsoft sign-in accounts; unique among documents that have one.|
+| microsoftOid   | String | that account's immutable Azure AD object id, for reference.            |
+| password       | String | bcrypt hash - legacy leftover on accounts created back when this app had its own registration page. Nothing in *this* app reads it and nothing can create one any more, but the AI Hub can optionally check it: its `ALLOW_PASSWORD_LOGIN` switch turns on a manual employee-ID + password sign-in for exactly these accounts. Leave the hash in place if you want that fallback to work for an account; drop it (`$unset`) if you don't. |
+| createdAt / lastLoginAt / updatedAt | Date | bookkeeping, not read by the app. |
+
+Employees now sign in with Microsoft at the AI Hub, which creates or updates this
+document by `email` on every sign-in - but never sets `employeeId` itself. That's a
+manual step: an admin sets it directly in MongoDB once they know who a new Microsoft
+sign-in actually is (`db.employees.updateOne({ email: "..." }, { $set: { employeeId: "..." } })`).
+Until that happens, the account can still sign in and look around, but anything keyed on
+employeeId won't work for it yet (the dashboard shows a banner explaining this). Because
+of that, `employeeId`'s uniqueness is enforced with a **partial** index - it only applies
+to documents that actually have a (string) employeeId, so any number of not-yet-tagged
+Microsoft accounts can coexist (see `db.js`). If you're tagging an account with an
+employeeId some *older*, password-era document already used, clear or delete that old
+document's employeeId first - the partial index still won't allow two documents to share
+one.
 
 Collection names are defined once in `constants.js` if you ever need to point
 this at differently-named collections.
@@ -145,9 +207,26 @@ in the target database, so it can't accidentally wipe real data — pass
 
 ## Single sign-on with the AI Hub
 
-Employees now sign in once, at the AI Hub, not here. This app's role is to accept a
-one-time hand-off token from the Hub and turn it into its own session cookie - see
-`/sso` in `server.js` and `middleware/auth.js`.
+Employees now sign in once, at the AI Hub - with Microsoft, not a password - not here.
+This app's role is to accept a one-time hand-off token from the Hub and turn it into its
+own session cookie - see `/sso` in `server.js` and `middleware/auth.js`.
+
+The old password login and registration flow is **gone**: `public/register.html`,
+`public/js/register.js` and `routes/auth.js` (which served `POST /api/auth/register` and
+`POST /api/auth/login`) have all been deleted, along with the `bcryptjs` dependency and
+the `ACCESS_CODE` env var that gated registration. The only `/api/auth/*` routes left are
+`GET /api/auth/me` and `POST /api/auth/logout`, both defined directly in `server.js`, plus
+the `GET /logout` hop the Hub's logout chain calls.
+
+New employees need no registration step here at all now - signing in with Microsoft at the
+Hub creates their `employees` record, and the Hub asks them for their employee number on
+that first sign-in and writes it to that same record (see the Hub's README).
+
+The Hub can also offer a manual employee-ID + password sign-in as a fallback, switched on
+and off with its own `ALLOW_PASSWORD_LOGIN` env var. That only works for accounts that
+still carry a bcrypt `password` hash from this app's old registration page, and it changes
+nothing here: whichever way someone signs in at the Hub, this app still just receives a
+hand-off token and mints its own session from it.
 
 Add these to `.env` (already present if you copied `.env.example` after this change):
 
@@ -202,9 +281,8 @@ inventory-management-system/
 ├── server.js              Express app entry point, connects to MongoDB
 ├── seed.js                 Populates sample employees + equipment
 ├── db.js                    Shared MongoClient connection + index setup
-├── constants.js              Collection names, Purpose/Misc-item option lists
+├── constants.js              Collection names, Event-type/Team/Misc-item option lists
 ├── routes/
-│   ├── auth.js               /api/auth/login, /api/auth/register
 │   ├── equipment.js           /api/equipment, /api/equipment/:id
 │   ├── borrow.js               /api/borrow/complete, /api/borrow/misc-items
 │   ├── return.js                /api/return/complete
@@ -257,7 +335,13 @@ Export bundles two things for the logged-in employee into a single `.docx`:
 
 ## Security note
 
-This is built for a trusted internal office tool. Passwords are hashed with bcrypt.
+This is built for a trusted internal office tool. Sign-in happens at the Hub, normally with
+Microsoft and gated to `@itemhound.com` accounts (checked both by the Azure app
+registration's own tenant restriction and independently by the Hub's own domain check).
+The Hub's optional `ALLOW_PASSWORD_LOGIN` switch can additionally accept the legacy
+bcrypt-hashed passwords described above; while that's on, those accounts are a second way
+in that skips the domain restriction, so keep it off unless you need it and make sure no
+old seeded demo account (`EMP001`-`EMP003`, password `password123`) still has a hash.
 Every API route except `/api/auth/*` now requires a valid session cookie
 (`middleware/auth.js`), issued either by logging in through the AI Hub or by the
 `/sso` hand-off route - previously these routes trusted whatever `employeeId` the

@@ -5,14 +5,28 @@
 // tag. Reading it here (instead of a client-writable store like
 // sessionStorage) means this can't be spoofed by editing browser storage -
 // the real gate already ran server-side before any of this HTML was sent.
+// The server only ever serves this page after confirming a real session
+// (requirePageSession + requireLiveEmployee in server.js), so
+// window.__SESSION__ itself is always present here - checking THAT (not
+// employeeId specifically) is what decides "not actually logged in". A
+// Microsoft sign-in that hasn't been tagged with an employeeId yet is still
+// a perfectly valid, logged-in session; bouncing it back to '/' here would
+// just redirect straight back to this same page (server.js sends any valid
+// session to /dashboard.html) - an infinite loop.
+if (!window.__SESSION__) {
+  window.location.href = '/';
+}
+
 const employeeId = window.__SESSION__ && window.__SESSION__.employeeId;
 const employeeName = window.__SESSION__ && window.__SESSION__.name;
 
 if (!employeeId) {
-  window.location.href = '/';
+  document.getElementById('pendingSetupBanner').classList.remove('hidden');
 }
 
-document.getElementById('welcomeText').textContent = `${employeeName} (${employeeId})`;
+document.getElementById('welcomeText').textContent = employeeId
+  ? `${employeeName} (${employeeId})`
+  : `${employeeName} (pending setup)`;
 
 // ---------- Admin mode ----------
 // The "Admin" employeeId unlocks a few extra powers on this page: editing
@@ -84,16 +98,6 @@ function conflictLabel(cart, equipmentId) {
   return isAdmin ? `${name} (${equipmentId})` : name;
 }
 
-// For messages built around an ID the user picked from the Borrow/Reserve
-// suggestion dropdown (rather than one they typed or scanned themselves) -
-// Admin still sees the raw ID, everyone else gets the item name looked up
-// from the already-loaded inventory list.
-function idLabel(equipmentId) {
-  if (isAdmin) return equipmentId;
-  const match = inventoryItems.find((it) => it.equipmentId === equipmentId);
-  return match ? `"${match.item}"` : 'That item';
-}
-
 // Some existing inventory rows have their status stored in uppercase
 // (AVAILABLE/UNAVAILABLE/RESERVED) from before this app's own borrow/
 // return/reserve actions settled on proper case (Available/Unavailable/
@@ -151,6 +155,13 @@ tabButtons.forEach((btn) => {
     }
     if (btn.dataset.tab === 'home') {
       loadMyItems();
+    }
+    if (btn.dataset.tab === 'request') {
+      // The Borrow start is "now", and step 2's availability badges go
+      // stale as soon as someone else borrows something - both are worth
+      // re-reading whenever this tab comes back into view.
+      refreshBorrowStartLabel();
+      if (requestStep === 2) loadInventory();
     }
   });
 });
@@ -849,40 +860,72 @@ async function homeReschedule(eventName, equipmentIds, dateValue, timeValue) {
 }
 
 // =======================================================
-// BORROW TAB
+// BORROW / RESERVE TAB
 // =======================================================
-let borrowCart = []; // { equipmentId, item, comment }
+// One tab, two steps, strictly in order:
+//
+//   Step 1 - create the event: name it, say what kind of event it is, and
+//            choose Borrow (starts now, only a return date is asked for) or
+//            Reserve (a start and a return date). Nothing about equipment
+//            is shown yet, and "Next" stays disabled until all of it is
+//            valid - which is also what unlocks step 2 in the stepper.
+//   Step 2 - pick the equipment: the whole inventory grouped by team, then
+//            split into per-category cards of checkboxes. Ticking a box
+//            pools the item into the cart; Complete tags every pooled item
+//            to the employee (via the same /api/borrow and /api/reserve
+//            endpoints the two separate tabs used to call).
+//
+// Both steps read and write one object - requestDraft - so step 2 never has
+// to re-derive dates or the acting employee from the form.
 const MISC_ITEMS = ['Masking Tape', 'Duct Tape', 'Zip Tie', 'Stickers', 'Printer Cable', 'HDMI Cable', 'DK-2205', 'Scissors'];
 
-const borrowInput = document.getElementById('borrowInput');
-const borrowAddBtn = document.getElementById('borrowAddBtn');
-const borrowMessage = document.getElementById('borrowMessage');
-const borrowCartBody = document.getElementById('borrowCartBody');
-const borrowCompleteBtn = document.getElementById('borrowCompleteBtn');
-const exportBtn = document.getElementById('exportBtn');
-const borrowStatusMessage = document.getElementById('borrowStatusMessage');
-const purposeSelect = document.getElementById('purposeSelect');
-const eventInput = document.getElementById('eventInput');
-const borrowOnBehalfInput = document.getElementById('borrowOnBehalfInput');
-const borrowUntilDateInput = document.getElementById('borrowUntilDateInput');
-const borrowUntilTimeInput = document.getElementById('borrowUntilTimeInput');
+// Mirrors TEAM_OPTIONS in constants.js. Items whose team field is blank or
+// missing entirely (everything imported before that column existed) are
+// grouped under this label rather than dropped from the picker - otherwise
+// they'd be impossible to borrow at all until someone tagged them.
+const TEAM_OPTIONS = ['Entractiv', 'Timing'];
+const UNASSIGNED_TEAM = 'Unassigned';
+const UNCATEGORIZED = 'Uncategorized';
 
-// Picking a date defaults its time to end-of-day (11:59 PM) so a due date can
-// be set with just one date pick - the time field stays fully editable
-// afterward for anyone who wants a precise hour (matches the Reserve tab's
-// date-picker behavior).
-borrowUntilDateInput.addEventListener('change', () => {
-  if (borrowUntilDateInput.value && !borrowUntilTimeInput.value) {
-    borrowUntilTimeInput.value = '23:59';
-  }
-});
+// The event built in step 1. Null until step 1 validates, which is exactly
+// what gates step 2 - see goToStep() and the stepper click handler.
+let requestDraft = null;
+let requestStep = 1;
+// equipmentId -> { equipmentId, item, comment, team, category } - the cart.
+const requestSelection = new Map();
+let requestFilter = '';
+const expandedTeams = new Set();
+const activeCategoryByTeam = new Map(); // team -> category name, or '' for All
+
+const requestStepper = document.getElementById('requestStepper');
+const requestStep1 = document.getElementById('requestStep1');
+const requestStep2 = document.getElementById('requestStep2');
+const eventNameInput = document.getElementById('eventNameInput');
+const eventTypeSelect = document.getElementById('eventTypeSelect');
+const borrowSchedule = document.getElementById('borrowSchedule');
+const reserveSchedule = document.getElementById('reserveSchedule');
+const borrowStartLabel = document.getElementById('borrowStartLabel');
+const borrowEndDateInput = document.getElementById('borrowEndDateInput');
+const borrowEndTimeInput = document.getElementById('borrowEndTimeInput');
+const reserveStartDateInput = document.getElementById('reserveStartDateInput');
+const reserveStartTimeInput = document.getElementById('reserveStartTimeInput');
+const reserveEndDateInput = document.getElementById('reserveEndDateInput');
+const reserveEndTimeInput = document.getElementById('reserveEndTimeInput');
+const requestOnBehalfInput = document.getElementById('requestOnBehalfInput');
+const requestStep1Message = document.getElementById('requestStep1Message');
+const requestNextBtn = document.getElementById('requestNextBtn');
+const requestSummary = document.getElementById('requestSummary');
+const requestFilterInput = document.getElementById('requestFilterInput');
+const teamAccordion = document.getElementById('teamAccordion');
+const requestCart = document.getElementById('requestCart');
+const requestSelectMessage = document.getElementById('requestSelectMessage');
+const requestCompleteBtn = document.getElementById('requestCompleteBtn');
+const requestStatusMessage = document.getElementById('requestStatusMessage');
+const exportBtn = document.getElementById('exportBtn');
 
 // Builds a fixed checklist of miscellaneous items inside `containerEl`: a
 // checkbox plus a +/- quantity stepper per row. The checked rows *are* the
-// miscellaneous cart - there's no separate "add to cart" step. Used for both
-// the Borrow and Reserve tabs, each with their own container element and
-// independent state (DOM traversal only, no shared IDs, so two instances
-// never collide).
+// miscellaneous cart - there's no separate "add to cart" step.
 function createMiscChecklist(containerEl) {
   containerEl.innerHTML = MISC_ITEMS.map(
     (item, idx) => `
@@ -955,189 +998,716 @@ function createMiscChecklist(containerEl) {
   return { getCheckedItems, reset };
 }
 
-const borrowMisc = createMiscChecklist(document.getElementById('miscChecklist'));
+const requestMisc = createMiscChecklist(document.getElementById('miscChecklist'));
 
-borrowAddBtn.addEventListener('click', handleBorrowAdd);
+// -------------------------------------------------------
+// Step 1: create the event
+// -------------------------------------------------------
 
-// Reserving equipment lets the reserving employee borrow/return it as many
-// times as they like within the hold window without releasing it early -
-// so an item that's Reserved by whoever is about to do this borrow (self,
-// or the on-behalf employee for Admin) is addable here too, not just plain
-// Available items.
-function isMyActiveReservation(data) {
-  const actingId = isAdmin ? borrowOnBehalfInput.value.trim() || employeeId : employeeId;
-  return (
-    normalizeStatusLabel(data.status) === 'Reserved' &&
-    data.employeeId === actingId &&
-    Boolean(data.reservedUntil) &&
-    new Date(data.reservedUntil).getTime() > Date.now()
-  );
+function currentModeValue() {
+  const checked = document.querySelector('input[name="requestMode"]:checked');
+  return checked ? checked.value : '';
 }
 
-async function handleBorrowAdd(overrideId) {
-  const id = (typeof overrideId === 'string' ? overrideId : borrowInput.value).trim();
-  setMessage(borrowMessage, '', null);
+// Borrow's start isn't picked, it's "right now" - so this is only ever a
+// read-only display. Refreshed whenever the mode is chosen or the tab is
+// opened, plus on a slow timer so it doesn't sit there showing a stale
+// minute while someone fills in the rest of the form.
+function refreshBorrowStartLabel() {
+  if (currentModeValue() !== 'borrow') return;
+  borrowStartLabel.textContent = new Date().toLocaleString();
+}
+setInterval(refreshBorrowStartLabel, 30000);
 
-  if (!id) {
-    setMessage(borrowMessage, 'Enter an Equipment ID first.', 'error');
-    return;
+// Reads the form and either returns the event to build, or the single most
+// relevant thing still missing from it. Used both to enable/disable "Next"
+// (silently, on every keystroke) and to explain the hold-up when it's
+// actually pressed.
+function readStep1Draft() {
+  if (!employeeId) {
+    return { error: "Your account isn't linked to an employee number yet - ask an admin to sort this out." };
   }
-  if (borrowCart.some((c) => c.equipmentId === id)) {
-    setMessage(borrowMessage, `${idLabel(id)} is already in your cart.`, 'error');
-    return;
-  }
 
-  try {
-    const res = await fetch(`/api/equipment/${encodeURIComponent(id)}`);
-    const data = await res.json();
+  const eventName = eventNameInput.value.trim();
+  if (!eventName) return { error: 'Enter an Event Name to continue.' };
 
-    if (!res.ok) {
-      setMessage(borrowMessage, data.message || 'Equipment not found.', 'error');
-      return;
+  const eventType = eventTypeSelect.value;
+  if (!eventType) return { error: 'Select an Event Type to continue.' };
+
+  const mode = currentModeValue();
+  if (!mode) return { error: 'Choose whether you want to borrow or reserve.' };
+
+  // Both branches build their Date objects here in the browser, so a picked
+  // "09:00" means 9 AM in *this employee's* local time. Only ISO instants
+  // are ever sent to the server (see the Complete handler below), which is
+  // what keeps the stored time from shifting by the server's own timezone
+  // offset.
+  let start;
+  let end;
+  if (mode === 'borrow') {
+    if (!borrowEndDateInput.value || !borrowEndTimeInput.value) {
+      return { error: 'Select the Return Date / Event End to continue.' };
     }
-
-    if (normalizeStatusLabel(data.status) !== 'Available' && !isMyActiveReservation(data)) {
-      const borrower = data.employeeName
-        ? `${data.employeeName} (${data.employeeId})`
-        : data.employeeId || 'another employee';
-      setMessage(
-        borrowMessage,
-        `"${data.item}"${idSuffix(data.equipmentId)} is currently borrowed by ${borrower}. Please select another item.`,
-        'error'
-      );
-      return;
+    start = new Date();
+    end = new Date(`${borrowEndDateInput.value}T${borrowEndTimeInput.value}`);
+    if (Number.isNaN(end.getTime())) return { error: 'Enter a valid Return Date / Event End.' };
+    if (end.getTime() <= Date.now()) return { error: 'The Return Date / Event End must be in the future.' };
+  } else {
+    if (!reserveStartDateInput.value || !reserveStartTimeInput.value) {
+      return { error: 'Select the Start Date / Event Start to continue.' };
     }
-
-    borrowCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
-    // Only clear the box for manual typing/camera-scan (no overrideId) - a
-    // suggestion-dropdown pick passes its equipmentId as overrideId and
-    // deliberately leaves the typed search text alone so more items can be
-    // picked from the same results without retyping.
-    if (typeof overrideId !== 'string') borrowInput.value = '';
-    setMessage(borrowMessage, `Added "${data.item}"${idSuffix(data.equipmentId)} to cart.`, 'success');
-    renderBorrowCart();
-  } catch (err) {
-    setMessage(borrowMessage, 'Could not reach the server.', 'error');
+    if (!reserveEndDateInput.value || !reserveEndTimeInput.value) {
+      return { error: 'Select the Return Date / Event End to continue.' };
+    }
+    start = new Date(`${reserveStartDateInput.value}T${reserveStartTimeInput.value}`);
+    end = new Date(`${reserveEndDateInput.value}T${reserveEndTimeInput.value}`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return { error: 'Enter a valid start and return date/time.' };
+    }
+    if (end.getTime() <= start.getTime()) {
+      return { error: 'The Return Date / Event End must be after the Start Date / Event Start.' };
+    }
+    if (end.getTime() <= Date.now()) return { error: 'The Return Date / Event End must be in the future.' };
   }
+
+  // Admin can act on behalf of any employee via the extra ID field that
+  // only appears for the Admin account - everyone else always acts as
+  // themselves.
+  let actingEmployeeId = employeeId;
+  if (isAdmin) {
+    const onBehalfId = requestOnBehalfInput.value.trim();
+    if (!onBehalfId) return { error: 'Enter the Employee ID to borrow/reserve on behalf of.' };
+    actingEmployeeId = onBehalfId;
+  }
+
+  return { draft: { eventName, eventType, mode, start, end, actingEmployeeId } };
 }
 
-function renderBorrowCart() {
-  if (borrowCart.length === 0) {
-    borrowCartBody.innerHTML = '<tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>';
+function updateStep1State() {
+  requestNextBtn.disabled = Boolean(readStep1Draft().error);
+}
+
+[eventNameInput, requestOnBehalfInput].forEach((el) => el.addEventListener('input', updateStep1State));
+eventTypeSelect.addEventListener('change', updateStep1State);
+
+document.querySelectorAll('input[name="requestMode"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    const mode = currentModeValue();
+    borrowSchedule.classList.toggle('hidden', mode !== 'borrow');
+    reserveSchedule.classList.toggle('hidden', mode !== 'reserve');
+    document.querySelectorAll('.mode-option').forEach((el) => {
+      el.classList.toggle('is-chosen', el.querySelector('input').checked);
+    });
+    refreshBorrowStartLabel();
+    updateStep1State();
+  });
+});
+
+// Picking a date defaults its time to the start/end of that day (12:00 AM /
+// 11:59 PM) so a whole event window can be set with just date picks - the
+// time fields stay fully editable afterward for anyone who wants a precise
+// hour.
+[
+  [borrowEndDateInput, borrowEndTimeInput, '23:59'],
+  [reserveStartDateInput, reserveStartTimeInput, '00:00'],
+  [reserveEndDateInput, reserveEndTimeInput, '23:59']
+].forEach(([dateInput, timeInput, defaultTime]) => {
+  dateInput.addEventListener('change', () => {
+    if (dateInput.value && !timeInput.value) timeInput.value = defaultTime;
+    updateStep1State();
+  });
+  timeInput.addEventListener('change', updateStep1State);
+});
+
+function goToStep(step) {
+  requestStep = step;
+  requestStep1.classList.toggle('active', step === 1);
+  requestStep2.classList.toggle('active', step === 2);
+  requestStepper.querySelectorAll('.stepper-step').forEach((el) => {
+    const n = Number(el.dataset.step);
+    el.classList.toggle('is-current', n === step);
+    el.classList.toggle('is-done', n < step);
+    // Step 2 can't be clicked into until step 1 has actually produced an
+    // event - that's the whole "no skipping ahead" rule.
+    el.classList.toggle('is-locked', n === 2 && !requestDraft);
+  });
+}
+
+requestStepper.querySelectorAll('.stepper-step').forEach((el) => {
+  el.addEventListener('click', () => {
+    const n = Number(el.dataset.step);
+    if (n === 2 && !requestDraft) {
+      setMessage(requestStep1Message, 'Fill in the event details and press Next before selecting equipment.', 'error');
+      return;
+    }
+    goToStep(n);
+  });
+});
+
+requestNextBtn.addEventListener('click', async () => {
+  const { draft, error } = readStep1Draft();
+  if (error) {
+    setMessage(requestStep1Message, error, 'error');
     return;
   }
-  borrowCartBody.innerHTML = borrowCart
-    .map(
-      (c, idx) => `
-      <tr>
-        ${idCell(c.equipmentId)}
-        <td>${escapeHtml(c.item)}</td>
-        <td>${escapeHtml(c.comment) || '-'}</td>
-        <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
-      </tr>`
-    )
+  setMessage(requestStep1Message, '', null);
+
+  // Switching between Borrow and Reserve changes which items are pickable
+  // at all (a Reserve can't take an item that already has an upcoming hold,
+  // a Borrow can), so coming back through here with a different mode
+  // re-checks everything already in the cart - see refreshRequestPicker.
+  requestDraft = draft;
+  renderRequestSummary();
+  goToStep(2);
+  // Statuses may have moved since the page loaded, so step 2 always opens
+  // against a freshly fetched inventory (which re-renders the picker on its
+  // own - see loadInventory).
+  await loadInventory();
+});
+
+document.getElementById('refreshRequestBtn').addEventListener('click', () => loadInventory());
+
+// -------------------------------------------------------
+// Step 2: pick the equipment
+// -------------------------------------------------------
+
+function renderRequestSummary() {
+  if (!requestDraft) {
+    requestSummary.innerHTML = '';
+    return;
+  }
+  const { eventName, eventType, mode, start, end } = requestDraft;
+  const startText = mode === 'borrow' ? `Now (${formatDateTime(start)})` : formatDateTime(start);
+  requestSummary.innerHTML = `
+    <div class="event-summary-main">
+      <span class="event-summary-mode mode-${mode}">${mode === 'borrow' ? 'Borrow' : 'Reserve'}</span>
+      <strong class="event-summary-name">${escapeHtml(eventName)}</strong>
+      <span class="event-summary-type">${escapeHtml(eventType)}</span>
+    </div>
+    <div class="event-summary-dates">${escapeHtml(startText)} &rarr; ${escapeHtml(formatDateTime(end))}</div>
+    <button id="requestEditBtn" type="button" class="secondary-btn">Edit Event Details</button>`;
+  requestSummary.querySelector('#requestEditBtn').addEventListener('click', () => goToStep(1));
+}
+
+function teamOf(it) {
+  return (it.team || '').trim() || UNASSIGNED_TEAM;
+}
+
+function categoryOf(it) {
+  return (it.category || '').trim() || UNCATEGORIZED;
+}
+
+// Whether this item can be pooled into the cart for the request being
+// built, plus whatever hold is already on it (so a blocked row can explain
+// itself with the event name and dates rather than just "unavailable").
+// Borrow and Reserve deliberately differ here, matching what
+// routes/borrow.js and routes/reserve.js will actually accept:
+//   - Borrowed by anyone: neither.
+//   - Actively reserved by the acting employee: borrow only (a reserving
+//     employee can check their own held items in and out freely within the
+//     window; a second reservation on top of it isn't a thing).
+//   - Actively reserved by someone else: neither.
+//   - Free right now but carrying an upcoming (not-yet-started) hold from
+//     anyone: borrow yes (the item genuinely is free), reserve no (only one
+//     upcoming hold is stored per item).
+//   - Plain Available: both.
+function requestAvailability(it) {
+  const statusLabel = normalizeStatusLabel(it.status);
+  const mode = requestDraft ? requestDraft.mode : 'borrow';
+  const actingId = requestDraft ? requestDraft.actingEmployeeId : employeeId;
+  const holderName = it.employeeName ? `${it.employeeName} (${it.employeeId})` : it.employeeId || null;
+
+  if (statusLabel === 'Unavailable') {
+    return {
+      label: 'Borrowed',
+      cssClass: 'pick-unavailable',
+      selectable: false,
+      hold: { who: holderName, event: it.event, from: null, until: it.borrowUntil }
+    };
+  }
+
+  const reservedActive = Boolean(it.reservedUntil) && new Date(it.reservedUntil).getTime() > Date.now();
+  if (statusLabel === 'Reserved' && reservedActive) {
+    const hold = { who: holderName, event: it.event, from: null, until: it.reservedUntil };
+    if (it.employeeId === actingId && mode === 'borrow') {
+      return { label: 'Reserved (yours)', cssClass: 'pick-mine', selectable: true, hold };
+    }
+    return { label: 'Reserved', cssClass: 'pick-reserved', selectable: false, hold };
+  }
+
+  const pending = it.pendingReservation;
+  const pendingUnexpired = Boolean(pending) && new Date(pending.end).getTime() > Date.now();
+  if (pendingUnexpired) {
+    const hold = { who: pending.employeeId, event: pending.event, from: pending.start, until: pending.end };
+    return { label: 'Reserved (upcoming)', cssClass: 'pick-upcoming', selectable: mode === 'borrow', hold };
+  }
+
+  return { label: 'Available', cssClass: 'pick-available', selectable: true, hold: null };
+}
+
+// The "event name and date" line shown on any row that's already spoken
+// for, whether that hold blocks this particular request or not.
+function holdNoteHtml(hold) {
+  if (!hold) return '';
+  const bits = [];
+  if (hold.event) bits.push(`<span class="pick-hold-event">${escapeHtml(hold.event)}</span>`);
+  if (hold.from && hold.until) {
+    bits.push(`${escapeHtml(formatDateTime(hold.from))} &rarr; ${escapeHtml(formatDateTime(hold.until))}`);
+  } else if (hold.until) {
+    bits.push(`until ${escapeHtml(formatDateTime(hold.until))}`);
+  }
+  if (hold.who) bits.push(escapeHtml(hold.who));
+  if (bits.length === 0) return '';
+  return `<span class="pick-hold">${bits.join(' &middot; ')}</span>`;
+}
+
+function matchesRequestFilter(it) {
+  return !requestFilter || equipmentLabelMatches(it, requestFilter);
+}
+
+// Fixed teams first in their declared order, then any unexpected value
+// alphabetically, with Unassigned always last since it isn't a real team.
+function requestTeamGroups() {
+  const byTeam = new Map();
+  inventoryItems.forEach((it) => {
+    const team = teamOf(it);
+    if (!byTeam.has(team)) byTeam.set(team, []);
+    byTeam.get(team).push(it);
+  });
+  const extras = [...byTeam.keys()]
+    .filter((t) => !TEAM_OPTIONS.includes(t) && t !== UNASSIGNED_TEAM)
+    .sort((a, b) => a.localeCompare(b));
+  const ordered = [
+    ...TEAM_OPTIONS.filter((t) => byTeam.has(t)),
+    ...extras,
+    ...(byTeam.has(UNASSIGNED_TEAM) ? [UNASSIGNED_TEAM] : [])
+  ];
+  return ordered.map((team) => [team, byTeam.get(team)]);
+}
+
+// Categories present in `items`, alphabetically, with Uncategorized last.
+function categoriesOf(items) {
+  const names = [...new Set(items.map(categoryOf))];
+  return [
+    ...names.filter((c) => c !== UNCATEGORIZED).sort((a, b) => a.localeCompare(b)),
+    ...(names.includes(UNCATEGORIZED) ? [UNCATEGORIZED] : [])
+  ];
+}
+
+function teamMetaText(total, available, selected) {
+  const parts = [`${total} item${total === 1 ? '' : 's'}`, `${available} selectable`];
+  if (selected) parts.push(`${selected} in cart`);
+  return parts.join(' · ');
+}
+
+function pickRowHtml(it) {
+  const avail = requestAvailability(it);
+  const selected = requestSelection.has(it.equipmentId);
+  const classes = ['pick-row', avail.cssClass];
+  if (selected) classes.push('is-selected');
+  if (!avail.selectable) classes.push('is-blocked');
+  if (avail.hold) classes.push('is-held');
+
+  const note = [it.comment, it.location, it.ports].filter(Boolean).join(' · ');
+
+  return `
+    <label class="${classes.join(' ')}">
+      <input
+        type="checkbox"
+        class="pick-check"
+        data-equipment-id="${escapeHtml(it.equipmentId)}"
+        ${selected ? 'checked' : ''}
+        ${avail.selectable ? '' : 'disabled'}
+      >
+      <span class="pick-body">
+        <span class="pick-name">${escapeHtml(it.item)}</span>
+        <span class="pick-id">${escapeHtml(it.equipmentId)}</span>
+        ${note ? `<span class="pick-note">${escapeHtml(note)}</span>` : ''}
+      </span>
+      <span class="pick-state">
+        <span class="pick-badge ${avail.cssClass}">${escapeHtml(avail.label)}</span>
+        ${holdNoteHtml(avail.hold)}
+      </span>
+    </label>`;
+}
+
+function renderTeamAccordion() {
+  if (!requestDraft) return;
+
+  const groups = requestTeamGroups();
+  if (groups.length === 0) {
+    teamAccordion.innerHTML = '<p class="empty-note">No equipment in the database yet.</p>';
+    return;
+  }
+
+  const html = groups
+    .map(([team, items]) => {
+      const visible = items.filter(matchesRequestFilter);
+      // A filter that matches nothing in this team hides the whole group -
+      // with no filter, every team stays listed so the counts are honest.
+      if (requestFilter && visible.length === 0) return '';
+
+      const selectedCount = items.filter((i) => requestSelection.has(i.equipmentId)).length;
+      const availableCount = items.filter((i) => requestAvailability(i).selectable).length;
+      // A filter is a search: auto-open whatever it matched rather than
+      // making people expand each team to find out where the hit was.
+      const expanded = expandedTeams.has(team) || Boolean(requestFilter);
+      const categories = categoriesOf(visible);
+      const activeCategory = activeCategoryByTeam.get(team) || '';
+      // A category tab can stop existing once the filter narrows things
+      // down - fall back to All rather than rendering an empty body.
+      const effectiveCategory = categories.includes(activeCategory) ? activeCategory : '';
+
+      const categoryTabs = `
+        <div class="category-tabs">
+          <button type="button" class="cat-tab${effectiveCategory === '' ? ' active' : ''}" data-team="${escapeHtml(team)}" data-category="">
+            All<span class="cat-count">${visible.length}</span>
+          </button>
+          ${categories
+            .map(
+              (cat) => `
+            <button type="button" class="cat-tab${effectiveCategory === cat ? ' active' : ''}" data-team="${escapeHtml(team)}" data-category="${escapeHtml(cat)}">
+              ${escapeHtml(cat)}<span class="cat-count">${visible.filter((i) => categoryOf(i) === cat).length}</span>
+            </button>`
+            )
+            .join('')}
+        </div>`;
+
+      const cards = categories
+        .filter((cat) => effectiveCategory === '' || cat === effectiveCategory)
+        .map((cat) => {
+          const catItems = visible
+            .filter((i) => categoryOf(i) === cat)
+            .sort((a, b) => a.item.localeCompare(b.item) || a.equipmentId.localeCompare(b.equipmentId));
+          const catSelected = catItems.filter((i) => requestSelection.has(i.equipmentId)).length;
+          return `
+          <div class="pick-card" data-category="${escapeHtml(cat)}">
+            <div class="pick-card-head">
+              <h4>${escapeHtml(cat)}</h4>
+              <span class="pick-card-meta">${catItems.length} item${catItems.length === 1 ? '' : 's'}${
+                catSelected ? ` · ${catSelected} selected` : ''
+              }</span>
+            </div>
+            <div class="pick-card-body">${catItems.map(pickRowHtml).join('')}</div>
+          </div>`;
+        })
+        .join('');
+
+      return `
+      <div class="team-group${expanded ? ' is-open' : ''}" data-team="${escapeHtml(team)}">
+        <button type="button" class="team-toggle" data-team="${escapeHtml(team)}" aria-expanded="${expanded}">
+          <span class="team-caret" aria-hidden="true"></span>
+          <span class="team-name">${escapeHtml(team)}</span>
+          <span class="team-meta" data-team-meta="${escapeHtml(team)}">${teamMetaText(items.length, availableCount, selectedCount)}</span>
+        </button>
+        <div class="team-body${expanded ? '' : ' hidden'}">
+          ${
+            visible.length === 0
+              ? '<p class="empty-note">No equipment in this team.</p>'
+              : `${categoryTabs}<div class="pick-cards">${cards}</div>`
+          }
+        </div>
+      </div>`;
+    })
     .join('');
 
-  borrowCartBody.querySelectorAll('.remove-btn').forEach((btn) => {
+  teamAccordion.innerHTML = html || '<p class="empty-note">No equipment matches that filter.</p>';
+
+  teamAccordion.querySelectorAll('.team-toggle').forEach((btn) => {
     btn.addEventListener('click', () => {
-      borrowCart.splice(Number(btn.dataset.idx), 1);
-      renderBorrowCart();
+      const team = btn.dataset.team;
+      if (expandedTeams.has(team)) expandedTeams.delete(team);
+      else expandedTeams.add(team);
+      // A filter force-opens every matching group, so collapsing one only
+      // means anything once the filter is cleared - drop it here so the
+      // click does something visible either way.
+      if (requestFilter) {
+        requestFilter = '';
+        requestFilterInput.value = '';
+      }
+      renderTeamAccordion();
+    });
+  });
+
+  teamAccordion.querySelectorAll('.cat-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activeCategoryByTeam.set(btn.dataset.team, btn.dataset.category);
+      renderTeamAccordion();
+    });
+  });
+
+  teamAccordion.querySelectorAll('.pick-check').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      toggleSelection(checkbox.dataset.equipmentId, checkbox.checked);
     });
   });
 }
 
-borrowCompleteBtn.addEventListener('click', async () => {
-  setMessage(borrowStatusMessage, '', null);
+// Ticking a box only needs the row's own look, the team/category counters
+// and the cart to change - rebuilding the whole accordion would lose scroll
+// position and the focus ring on the checkbox that was just clicked.
+function syncPickerCounters() {
+  requestTeamGroups().forEach(([team, items]) => {
+    const metaEl = teamAccordion.querySelector(`[data-team-meta="${CSS.escape(team)}"]`);
+    if (!metaEl) return;
+    const selectedCount = items.filter((i) => requestSelection.has(i.equipmentId)).length;
+    const availableCount = items.filter((i) => requestAvailability(i).selectable).length;
+    metaEl.textContent = teamMetaText(items.length, availableCount, selectedCount);
+  });
 
-  const miscItems = borrowMisc.getCheckedItems();
+  teamAccordion.querySelectorAll('.pick-check').forEach((checkbox) => {
+    const row = checkbox.closest('.pick-row');
+    if (row) row.classList.toggle('is-selected', requestSelection.has(checkbox.dataset.equipmentId));
+  });
 
-  if (borrowCart.length === 0 && miscItems.length === 0) {
-    setMessage(borrowStatusMessage, 'Add at least one item before completing.', 'error');
-    return;
-  }
-
-  const purpose = purposeSelect.value;
-  if (borrowCart.length > 0 && !purpose) {
-    setMessage(borrowStatusMessage, 'Select a Purpose before completing the borrow.', 'error');
-    return;
-  }
-
-  const eventValue = eventInput.value.trim();
-  if (borrowCart.length > 0 && !eventValue) {
-    setMessage(borrowStatusMessage, 'Enter an Event before completing the borrow.', 'error');
-    return;
-  }
-
-  // Same timezone-safe pattern as the Reserve tab: build the Date here in the
-  // browser (so the picked date/time means what the employee actually saw)
-  // and send an ISO instant string, rather than letting the server
-  // reconstruct it from separate date/time strings in its own timezone.
-  const borrowUntilDateValue = borrowUntilDateInput.value;
-  const borrowUntilTimeValue = borrowUntilTimeInput.value;
-  if (borrowCart.length > 0 && (!borrowUntilDateValue || !borrowUntilTimeValue)) {
-    setMessage(borrowStatusMessage, 'Select a Borrow Until date/time before completing the borrow.', 'error');
-    return;
-  }
-  let borrowUntilISO = null;
-  if (borrowCart.length > 0) {
-    const borrowUntilCheck = new Date(`${borrowUntilDateValue}T${borrowUntilTimeValue}`);
-    if (borrowUntilCheck.getTime() <= Date.now()) {
-      setMessage(borrowStatusMessage, 'Borrow Until must be a future date/time.', 'error');
-      return;
+  teamAccordion.querySelectorAll('.pick-card').forEach((card) => {
+    const ids = [...card.querySelectorAll('.pick-check')].map((c) => c.dataset.equipmentId);
+    const selected = ids.filter((id) => requestSelection.has(id)).length;
+    const metaEl = card.querySelector('.pick-card-meta');
+    if (metaEl) {
+      metaEl.textContent = `${ids.length} item${ids.length === 1 ? '' : 's'}${selected ? ` · ${selected} selected` : ''}`;
     }
-    borrowUntilISO = borrowUntilCheck.toISOString();
+  });
+}
+
+function toggleSelection(equipmentId, checked) {
+  const it = inventoryItems.find((i) => i.equipmentId === equipmentId);
+  if (!it) return;
+
+  if (checked) {
+    if (!requestAvailability(it).selectable) return;
+    requestSelection.set(equipmentId, {
+      equipmentId: it.equipmentId,
+      item: it.item,
+      comment: it.comment,
+      team: teamOf(it),
+      category: categoryOf(it)
+    });
+  } else {
+    requestSelection.delete(equipmentId);
   }
 
-  // Admin can borrow on behalf of any employee via the extra ID field that
-  // only appears for the Admin account - everyone else always borrows as
-  // themselves.
-  let actingEmployeeId = employeeId;
-  if (isAdmin) {
-    const onBehalfId = borrowOnBehalfInput.value.trim();
-    if (!onBehalfId) {
-      setMessage(borrowStatusMessage, 'Enter the Employee ID to borrow on behalf of.', 'error');
-      return;
+  renderRequestCart();
+  syncPickerCounters();
+}
+
+function renderRequestCart() {
+  const picked = [...requestSelection.values()];
+  if (picked.length === 0) {
+    requestCart.innerHTML =
+      '<p class="empty-note">No equipment selected yet. Tick the items you need above and they\'ll pool here.</p>';
+    return;
+  }
+
+  requestCart.innerHTML = `
+    <div class="request-cart-head">
+      <strong>${picked.length} item${picked.length === 1 ? '' : 's'} selected</strong>
+      <button type="button" class="remove-btn" id="requestClearCartBtn">Clear All</button>
+    </div>
+    <ul class="request-cart-list">
+      ${picked
+        .map(
+          (c) => `
+        <li>
+          <span class="tag-chip">${escapeHtml(c.equipmentId)}</span>
+          <span class="request-cart-name">${escapeHtml(c.item)}</span>
+          <span class="request-cart-meta">${escapeHtml(c.team)} &middot; ${escapeHtml(c.category)}</span>
+          <button type="button" class="remove-btn" data-equipment-id="${escapeHtml(c.equipmentId)}">Remove</button>
+        </li>`
+        )
+        .join('')}
+    </ul>`;
+
+  requestCart.querySelector('#requestClearCartBtn').addEventListener('click', () => {
+    requestSelection.clear();
+    // Unticking has to happen in the DOM too - the accordion isn't rebuilt
+    // on a cart change (see syncPickerCounters).
+    teamAccordion.querySelectorAll('.pick-check:checked').forEach((c) => {
+      c.checked = false;
+    });
+    renderRequestCart();
+    syncPickerCounters();
+  });
+
+  requestCart.querySelectorAll('.remove-btn[data-equipment-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.equipmentId;
+      requestSelection.delete(id);
+      const checkbox = teamAccordion.querySelector(`.pick-check[data-equipment-id="${CSS.escape(id)}"]`);
+      if (checkbox) checkbox.checked = false;
+      renderRequestCart();
+      syncPickerCounters();
+    });
+  });
+}
+
+// Anything in the cart that a fresh inventory read (or a switch between
+// Borrow and Reserve) has made un-pickable is dropped here, rather than
+// waiting for the server to reject the whole request at Complete.
+function pruneInvalidSelection() {
+  const dropped = [];
+  [...requestSelection.keys()].forEach((id) => {
+    const it = inventoryItems.find((i) => i.equipmentId === id);
+    if (!it || !requestAvailability(it).selectable) {
+      dropped.push(requestSelection.get(id).item);
+      requestSelection.delete(id);
     }
-    actingEmployeeId = onBehalfId;
+  });
+  if (dropped.length > 0) {
+    setMessage(
+      requestSelectMessage,
+      `Removed from your cart - no longer available for this request: ${dropped.map((n) => `"${n}"`).join(', ')}.`,
+      'error'
+    );
+  }
+}
+
+// Called by loadInventory() so the picker always reflects the same dataset
+// the rest of the page is working from.
+function refreshRequestPicker() {
+  if (!requestDraft) return;
+  pruneInvalidSelection();
+  renderTeamAccordion();
+  renderRequestCart();
+}
+
+requestFilterInput.addEventListener('input', () => {
+  requestFilter = requestFilterInput.value.trim();
+  renderTeamAccordion();
+});
+
+// A barcode scan is just a very precise filter: the scanned ID goes into the
+// filter box (so the item is the only thing left on screen) and gets ticked,
+// if it's pickable for this request at all.
+function requestPickByScan(scannedValue) {
+  const id = (scannedValue || '').trim();
+  setMessage(requestSelectMessage, '', null);
+  if (!id) return;
+
+  requestFilter = id;
+  requestFilterInput.value = id;
+
+  const it = inventoryItems.find((i) => i.equipmentId.toLowerCase() === id.toLowerCase());
+  if (!it) {
+    renderTeamAccordion();
+    setMessage(requestSelectMessage, `Equipment ID "${id}" was not found.`, 'error');
+    return;
   }
 
-  const itemCount = borrowCart.length + miscItems.length;
+  expandedTeams.add(teamOf(it));
+  activeCategoryByTeam.set(teamOf(it), '');
+
+  if (requestSelection.has(it.equipmentId)) {
+    renderTeamAccordion();
+    setMessage(requestSelectMessage, `"${it.item}"${idSuffix(it.equipmentId)} is already in your cart.`, 'success');
+    return;
+  }
+
+  const avail = requestAvailability(it);
+  if (!avail.selectable) {
+    renderTeamAccordion();
+    const holder = avail.hold && avail.hold.who ? ` by ${avail.hold.who}` : '';
+    const forEvent = avail.hold && avail.hold.event ? ` for "${avail.hold.event}"` : '';
+    setMessage(
+      requestSelectMessage,
+      `"${it.item}"${idSuffix(it.equipmentId)} is ${avail.label.toLowerCase()}${holder}${forEvent}. Please pick another item.`,
+      'error'
+    );
+    return;
+  }
+
+  toggleSelection(it.equipmentId, true);
+  renderTeamAccordion();
+  setMessage(requestSelectMessage, `Added "${it.item}"${idSuffix(it.equipmentId)} to your cart.`, 'success');
+}
+
+requestCompleteBtn.addEventListener('click', async () => {
+  setMessage(requestStatusMessage, '', null);
+
+  if (!requestDraft) {
+    goToStep(1);
+    setMessage(requestStep1Message, 'Fill in the event details first.', 'error');
+    return;
+  }
+
+  const miscItems = requestMisc.getCheckedItems();
+  const picked = [...requestSelection.values()];
+  const equipmentIds = picked.map((c) => c.equipmentId);
+
+  if (equipmentIds.length === 0 && miscItems.length === 0) {
+    setMessage(requestStatusMessage, 'Select at least one item before completing.', 'error');
+    return;
+  }
+
+  const isBorrow = requestDraft.mode === 'borrow';
+  if (requestDraft.end.getTime() <= Date.now()) {
+    setMessage(
+      requestStatusMessage,
+      'The Return Date / Event End has already passed. Go back to Event Details and pick a new one.',
+      'error'
+    );
+    return;
+  }
+
+  const itemCount = equipmentIds.length + miscItems.length;
   const confirmed = await askConfirm(
-    `Complete this borrow of ${itemCount} item${itemCount === 1 ? '' : 's'}? The selected equipment will be marked as unavailable.`
+    isBorrow
+      ? `Borrow ${itemCount} item${itemCount === 1 ? '' : 's'} for "${requestDraft.eventName}"? The selected equipment will be marked unavailable and tagged to you until ${formatDateTime(requestDraft.end)}.`
+      : `Reserve ${itemCount} item${itemCount === 1 ? '' : 's'} for "${requestDraft.eventName}"? If the start is in the future, the equipment stays available to everyone until then.`
   );
   if (!confirmed) return;
 
+  // Borrow starts "now", so its start instant is taken at this moment
+  // rather than whenever step 1 happened to be filled in.
+  const body = isBorrow
+    ? {
+        employeeId: requestDraft.actingEmployeeId,
+        purpose: requestDraft.eventType,
+        event: requestDraft.eventName,
+        equipmentIds,
+        miscItems,
+        borrowUntil: requestDraft.end.toISOString()
+      }
+    : {
+        employeeId: requestDraft.actingEmployeeId,
+        purpose: requestDraft.eventType,
+        event: requestDraft.eventName,
+        start: requestDraft.start.toISOString(),
+        end: requestDraft.end.toISOString(),
+        equipmentIds,
+        miscItems
+      };
+
   try {
-    const res = await fetch('/api/borrow/complete', {
+    const res = await fetch(isBorrow ? '/api/borrow/complete' : '/api/reserve/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        employeeId: actingEmployeeId,
-        purpose: purpose || null,
-        event: eventValue || null,
-        equipmentIds: borrowCart.map((c) => c.equipmentId),
-        miscItems,
-        borrowUntil: borrowUntilISO
-      })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
 
     if (!res.ok) {
       if (data.conflicts) {
         const lines = data.conflicts.map((c) => {
-          if (c.reason === 'unavailable') {
-            return `${conflictLabel(borrowCart, c.equipmentId)} is now borrowed by ${c.borrowerId}.`;
+          if (c.reason === 'pending_reservation') {
+            return `${conflictLabel(picked, c.equipmentId)} already has an upcoming reservation from ${c.borrowerId}.`;
           }
-          return `${conflictLabel(borrowCart, c.equipmentId)} was not found.`;
+          if (c.reason === 'unavailable') {
+            return `${conflictLabel(picked, c.equipmentId)} is no longer available.`;
+          }
+          return `${conflictLabel(picked, c.equipmentId)} was not found.`;
         });
-        setMessage(borrowStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
+        setMessage(requestStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
+        // Whatever the server rejected drops out of the cart on its own once
+        // the refreshed statuses come back (see pruneInvalidSelection).
+        await loadInventory();
       } else {
-        setMessage(borrowStatusMessage, data.message || 'Could not complete the borrow.', 'error');
+        setMessage(requestStatusMessage, data.message || 'Could not complete the request.', 'error');
       }
       return;
     }
 
-    // Reload straight back to My Items rather than resetting the cart/form
+    // Reload straight back to My Items rather than resetting the two steps
     // in place - My Items is the tab already marked active in the static
     // HTML, so a fresh page load lands there on its own. (This does mean
     // the "Export to Word" button below - only ever enabled right after a
@@ -1145,17 +1715,17 @@ borrowCompleteBtn.addEventListener('click', async () => {
     // on; that's an accepted tradeoff of reloading here.)
     window.location.reload();
   } catch (err) {
-    setMessage(borrowStatusMessage, 'Could not reach the server.', 'error');
+    setMessage(requestStatusMessage, 'Could not reach the server.', 'error');
   }
 });
 
 exportBtn.addEventListener('click', async () => {
-  setMessage(borrowStatusMessage, 'Generating document…', null);
+  setMessage(requestStatusMessage, 'Generating document…', null);
   try {
     const res = await fetch(`/api/export/${encodeURIComponent(employeeId)}`);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setMessage(borrowStatusMessage, data.message || 'Could not generate the document.', 'error');
+      setMessage(requestStatusMessage, data.message || 'Could not generate the document.', 'error');
       return;
     }
     const blob = await res.blob();
@@ -1167,11 +1737,14 @@ exportBtn.addEventListener('click', async () => {
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
-    setMessage(borrowStatusMessage, 'Document downloaded.', 'success');
+    setMessage(requestStatusMessage, 'Document downloaded.', 'success');
   } catch (err) {
-    setMessage(borrowStatusMessage, 'Could not reach the server.', 'error');
+    setMessage(requestStatusMessage, 'Could not reach the server.', 'error');
   }
 });
+
+updateStep1State();
+renderRequestCart();
 
 // =======================================================
 // RETURN TAB
@@ -1304,439 +1877,11 @@ returnCompleteBtn.addEventListener('click', async () => {
   }
 });
 
-// =======================================================
-// RESERVE TAB
-// =======================================================
-// Reserving equipment doesn't check it out the way Borrow does - it just
-// flags it (yellow "Reserved" tag) as held for a future date/event. The
-// Return tab is what releases a reservation back to Available later.
-let reserveCart = []; // { equipmentId, item, comment }
-
-const reserveInput = document.getElementById('reserveInput');
-const reserveAddBtn = document.getElementById('reserveAddBtn');
-const reserveMessage = document.getElementById('reserveMessage');
-const reserveCartBody = document.getElementById('reserveCartBody');
-const reserveCompleteBtn = document.getElementById('reserveCompleteBtn');
-const reserveStatusMessage = document.getElementById('reserveStatusMessage');
-const reservePurposeSelect = document.getElementById('reservePurposeSelect');
-const reserveEventInput = document.getElementById('reserveEventInput');
-const reserveStartDateInput = document.getElementById('reserveStartDateInput');
-const reserveStartTimeInput = document.getElementById('reserveStartTimeInput');
-const reserveEndDateInput = document.getElementById('reserveEndDateInput');
-const reserveEndTimeInput = document.getElementById('reserveEndTimeInput');
-const reserveOnBehalfInput = document.getElementById('reserveOnBehalfInput');
-const reserveMisc = createMiscChecklist(document.getElementById('miscChecklistReserve'));
-
-// Picking a date defaults its time to the start/end of that day (12:00 AM /
-// 11:59 PM) so a reservation can be made with just two date picks - the time
-// fields stay fully editable afterward for anyone who wants a precise hour.
-reserveStartDateInput.addEventListener('change', () => {
-  if (reserveStartDateInput.value && !reserveStartTimeInput.value) {
-    reserveStartTimeInput.value = '00:00';
-  }
-});
-reserveEndDateInput.addEventListener('change', () => {
-  if (reserveEndDateInput.value && !reserveEndTimeInput.value) {
-    reserveEndTimeInput.value = '23:59';
-  }
-});
-
-reserveAddBtn.addEventListener('click', handleReserveAdd);
-
-async function handleReserveAdd(overrideId) {
-  const id = (typeof overrideId === 'string' ? overrideId : reserveInput.value).trim();
-  setMessage(reserveMessage, '', null);
-
-  if (!id) {
-    setMessage(reserveMessage, 'Enter an Equipment ID first.', 'error');
-    return;
-  }
-  if (reserveCart.some((c) => c.equipmentId === id)) {
-    setMessage(reserveMessage, `${idLabel(id)} is already in your cart.`, 'error');
-    return;
-  }
-
-  try {
-    const res = await fetch(`/api/equipment/${encodeURIComponent(id)}`);
-    const data = await res.json();
-
-    if (!res.ok) {
-      setMessage(reserveMessage, data.message || 'Equipment not found.', 'error');
-      return;
-    }
-
-    const reserveStatusLabel = normalizeStatusLabel(data.status);
-    const pendingActive = data.pendingReservation && new Date(data.pendingReservation.end).getTime() > Date.now();
-    if (reserveStatusLabel !== 'Available') {
-      let reason;
-      if (reserveStatusLabel === 'Reserved') {
-        reason = `is already reserved${data.event ? ` for "${data.event}"` : ''}${data.reservedUntil ? ` until ${formatDateTime(data.reservedUntil)}` : ''}`;
-      } else {
-        const borrower = data.employeeName
-          ? `${data.employeeName} (${data.employeeId})`
-          : data.employeeId || 'another employee';
-        reason = `is currently borrowed by ${borrower}`;
-      }
-      setMessage(reserveMessage, `"${data.item}"${idSuffix(data.equipmentId)} ${reason}. Please select another item.`, 'error');
-      return;
-    }
-    if (pendingActive) {
-      setMessage(
-        reserveMessage,
-        `"${data.item}"${idSuffix(data.equipmentId)} already has an upcoming reservation${
-          data.pendingReservation.event ? ` for "${data.pendingReservation.event}"` : ''
-        } starting ${formatDateTime(data.pendingReservation.start)}. Please select another item.`,
-        'error'
-      );
-      return;
-    }
-
-    reserveCart.push({ equipmentId: data.equipmentId, item: data.item, comment: data.comment });
-    // Only clear the box for manual typing/camera-scan (no overrideId) - a
-    // suggestion-dropdown pick passes its equipmentId as overrideId and
-    // deliberately leaves the typed search text alone so more items can be
-    // picked from the same results without retyping.
-    if (typeof overrideId !== 'string') reserveInput.value = '';
-    setMessage(reserveMessage, `Added "${data.item}"${idSuffix(data.equipmentId)} to cart.`, 'success');
-    renderReserveCart();
-  } catch (err) {
-    setMessage(reserveMessage, 'Could not reach the server.', 'error');
-  }
-}
-
-function renderReserveCart() {
-  if (reserveCart.length === 0) {
-    reserveCartBody.innerHTML = '<tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>';
-    return;
-  }
-  reserveCartBody.innerHTML = reserveCart
-    .map(
-      (c, idx) => `
-      <tr>
-        ${idCell(c.equipmentId)}
-        <td>${escapeHtml(c.item)}</td>
-        <td>${escapeHtml(c.comment) || '-'}</td>
-        <td><button class="remove-btn" data-idx="${idx}" type="button">Remove</button></td>
-      </tr>`
-    )
-    .join('');
-
-  reserveCartBody.querySelectorAll('.remove-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      reserveCart.splice(Number(btn.dataset.idx), 1);
-      renderReserveCart();
-    });
-  });
-}
-
-reserveCompleteBtn.addEventListener('click', async () => {
-  setMessage(reserveStatusMessage, '', null);
-
-  const miscItems = reserveMisc.getCheckedItems();
-
-  if (reserveCart.length === 0 && miscItems.length === 0) {
-    setMessage(reserveStatusMessage, 'Add at least one item before completing.', 'error');
-    return;
-  }
-
-  const purpose = reservePurposeSelect.value;
-  if (reserveCart.length > 0 && !purpose) {
-    setMessage(reserveStatusMessage, 'Select a Purpose before completing the reservation.', 'error');
-    return;
-  }
-
-  const eventValue = reserveEventInput.value.trim();
-  if (reserveCart.length > 0 && !eventValue) {
-    setMessage(reserveStatusMessage, 'Enter an Event before completing the reservation.', 'error');
-    return;
-  }
-
-  const startDateValue = reserveStartDateInput.value;
-  const startTimeValue = reserveStartTimeInput.value;
-  const endDateValue = reserveEndDateInput.value;
-  const endTimeValue = reserveEndTimeInput.value;
-  if (reserveCart.length > 0 && (!startDateValue || !startTimeValue || !endDateValue || !endTimeValue)) {
-    setMessage(reserveStatusMessage, 'Select a start and end date/time before completing the reservation.', 'error');
-    return;
-  }
-  // Built here in the browser so "09:00" means 9 AM in *this employee's*
-  // local time, then converted to an unambiguous ISO instant (toISOString())
-  // before it ever leaves the client - the server just parses that instant
-  // directly (see routes/reserve.js), so the reservation always lands on
-  // the wall-clock time actually picked, regardless of what timezone the
-  // server itself runs in. Sending raw date/time strings for the server to
-  // reconstruct used to shift the stored time by the server/browser
-  // timezone offset, which is why the My Items display could disagree with
-  // what was selected here.
-  let reservationStartISO = null;
-  let reservationEndISO = null;
-  if (reserveCart.length > 0) {
-    const startCheck = new Date(`${startDateValue}T${startTimeValue}`);
-    const endCheck = new Date(`${endDateValue}T${endTimeValue}`);
-    if (endCheck.getTime() <= startCheck.getTime()) {
-      setMessage(reserveStatusMessage, 'The end date/time must be after the start date/time.', 'error');
-      return;
-    }
-    reservationStartISO = startCheck.toISOString();
-    reservationEndISO = endCheck.toISOString();
-  }
-
-  // Admin can reserve on behalf of any employee via the extra ID field that
-  // only appears for the Admin account - everyone else always reserves as
-  // themselves.
-  let actingEmployeeId = employeeId;
-  if (isAdmin) {
-    const onBehalfId = reserveOnBehalfInput.value.trim();
-    if (!onBehalfId) {
-      setMessage(reserveStatusMessage, 'Enter the Employee ID to reserve on behalf of.', 'error');
-      return;
-    }
-    actingEmployeeId = onBehalfId;
-  }
-
-  const reserveItemCount = reserveCart.length + miscItems.length;
-  const confirmed = await askConfirm(
-    `Complete this reservation of ${reserveItemCount} item${reserveItemCount === 1 ? '' : 's'}? If the start is in the future, the item stays available to everyone until then.`
-  );
-  if (!confirmed) return;
-
-  try {
-    const res = await fetch('/api/reserve/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        employeeId: actingEmployeeId,
-        purpose: purpose || null,
-        event: eventValue || null,
-        start: reservationStartISO,
-        end: reservationEndISO,
-        equipmentIds: reserveCart.map((c) => c.equipmentId),
-        miscItems
-      })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      if (data.conflicts) {
-        const lines = data.conflicts.map((c) => {
-          if (c.reason === 'pending_reservation') {
-            return `${conflictLabel(reserveCart, c.equipmentId)} already has an upcoming reservation from ${c.borrowerId}.`;
-          }
-          if (c.reason === 'unavailable') {
-            return `${conflictLabel(reserveCart, c.equipmentId)} is no longer available.`;
-          }
-          return `${conflictLabel(reserveCart, c.equipmentId)} was not found.`;
-        });
-        setMessage(reserveStatusMessage, `${data.message} ${lines.join(' ')}`, 'error');
-      } else {
-        setMessage(reserveStatusMessage, data.message || 'Could not complete the reservation.', 'error');
-      }
-      return;
-    }
-
-    // Reload straight back to My Items rather than resetting the cart/form
-    // in place - My Items is the tab already marked active in the static
-    // HTML, so a fresh page load lands there on its own.
-    window.location.reload();
-  } catch (err) {
-    setMessage(reserveStatusMessage, 'Could not reach the server.', 'error');
-  }
-});
-
-// =======================================================
-// KEYWORD SUGGESTION DROPDOWN (Borrow & Reserve only - never Return)
-// =======================================================
-// Typing an Equipment ID or item name keyword into the Borrow/Reserve inputs
-// shows a dropdown of matches (built from the already-loaded inventory
-// list) so people don't have to remember/type the exact ID. Deliberately
-// left off the Return tab - Return is barcode-scan only so a return always
-// matches a physical item actually in hand.
-// Computes the availability badge/clickability shown per suggestion row.
-// actingId is whoever will actually receive the added item - self, or the
-// on-behalf employeeId for Admin - matching isMyActiveReservation's own
-// definition of "mine" above. Five outcomes, matching how Borrow/Reserve are
-// meant to behave from the suggestion dropdown:
-//   - Available (no pending claim either): clickable, adds normally.
-//   - Unavailable (someone has it checked out): not clickable.
-//   - Actively Reserved by someone else (on the shelf, awaiting their
-//     pickup): not clickable.
-//   - Actively Reserved by the acting employee themselves: clickable (lets
-//     them pick up their own reservation from here too).
-//   - Not currently held by anyone, but already has a future/pending
-//     reservation from someone else: still clickable - the item is
-//     genuinely Available right now, the future hold just hasn't started.
-function suggestAvailability(it, actingId) {
-  const statusLabel = normalizeStatusLabel(it.status);
-
-  if (statusLabel === 'Unavailable') {
-    return { label: 'Unavailable', cssClass: 'suggest-unavailable', clickable: false };
-  }
-
-  const reservedActive =
-    statusLabel === 'Reserved' && Boolean(it.reservedUntil) && new Date(it.reservedUntil).getTime() > Date.now();
-  if (reservedActive) {
-    if (it.employeeId === actingId) {
-      return { label: 'Reserved (yours)', cssClass: 'suggest-reserved-mine', clickable: true };
-    }
-    return { label: 'Reserved', cssClass: 'suggest-reserved', clickable: false };
-  }
-
-  const pendingUnexpired =
-    Boolean(it.pendingReservation) && new Date(it.pendingReservation.end).getTime() > Date.now();
-  if (pendingUnexpired) {
-    return { label: 'Reserved (upcoming)', cssClass: 'suggest-upcoming', clickable: true };
-  }
-
-  return { label: 'Available', cssClass: 'suggest-available', clickable: true };
-}
-
-function setupSuggestDropdown(inputEl, listEl, { getCandidates, getAvailability, onPick, onEnterFallback }) {
-  let items = [];
-  let activeIdx = -1;
-  // Equipment IDs currently mid-add (onPick called, not yet resolved) - a
-  // second click/Enter on the same item while it's still in flight is
-  // ignored outright, rather than racing two adds for the same item before
-  // the cart-membership filter below has a chance to exclude it.
-  const pendingPickIds = new Set();
-
-  function render(query) {
-    items = getCandidates(query);
-    if (items.length === 0) {
-      listEl.innerHTML = query ? '<div class="suggest-empty">No matching equipment.</div>' : '';
-      listEl.classList.toggle('hidden', !query);
-      activeIdx = -1;
-      return;
-    }
-    listEl.innerHTML = items
-      .map((it, idx) => {
-        const avail = getAvailability(it);
-        return `
-        <div class="suggest-item${avail.clickable ? '' : ' suggest-item-blocked'}" data-idx="${idx}">
-          <span class="suggest-main">
-            <span class="suggest-id">${escapeHtml(it.equipmentId)}</span>
-            <span class="suggest-name">${escapeHtml(it.item)}</span>
-          </span>
-          <span class="suggest-status ${avail.cssClass}">${escapeHtml(avail.label)}</span>
-        </div>`;
-      })
-      .join('');
-    listEl.classList.remove('hidden');
-    activeIdx = -1;
-    listEl.querySelectorAll('.suggest-item').forEach((el) => {
-      // mousedown (not click) fires before the input's blur, so the pick
-      // still runs while the dropdown is visible/selectable.
-      el.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        pick(Number(el.dataset.idx));
-      });
-    });
-  }
-
-  function highlight() {
-    listEl.querySelectorAll('.suggest-item').forEach((el, idx) => {
-      el.classList.toggle('active', idx === activeIdx);
-    });
-  }
-
-  function pick(idx) {
-    const chosen = items[idx];
-    if (!chosen) return;
-    // Unavailable / actively-reserved-by-someone-else rows are shown for
-    // context but do nothing when clicked/selected.
-    if (!getAvailability(chosen).clickable) return;
-    // Already mid-add from a previous click on this same item - ignore the
-    // re-click rather than firing a second, overlapping add for it.
-    if (pendingPickIds.has(chosen.equipmentId)) return;
-    pendingPickIds.add(chosen.equipmentId);
-    // Deliberately doesn't hide() or touch inputEl.value - the dropdown
-    // stays open with the same typed query so multiple items can be picked
-    // back-to-back. Once onPick (which may be async) resolves, refresh the
-    // list: a successful add drops this item out via the cart-membership
-    // filter in getCandidates, so it's no longer there to re-click; a
-    // failed add (e.g. it went Unavailable in the meantime) just leaves it
-    // there, pickable again.
-    Promise.resolve(onPick(chosen)).then(() => {
-      pendingPickIds.delete(chosen.equipmentId);
-      render(inputEl.value.trim());
-    });
-  }
-
-  function hide() {
-    listEl.classList.add('hidden');
-    listEl.innerHTML = '';
-    items = [];
-    activeIdx = -1;
-  }
-
-  inputEl.addEventListener('input', () => render(inputEl.value.trim()));
-  inputEl.addEventListener('focus', () => {
-    if (inputEl.value.trim()) render(inputEl.value.trim());
-  });
-  inputEl.addEventListener('blur', () => {
-    // Delay so a mousedown-triggered pick() above still gets to run first.
-    setTimeout(hide, 150);
-  });
-  inputEl.addEventListener('keydown', (e) => {
-    const visible = !listEl.classList.contains('hidden') && items.length > 0;
-    if (e.key === 'ArrowDown' && visible) {
-      e.preventDefault();
-      activeIdx = Math.min(activeIdx + 1, items.length - 1);
-      highlight();
-    } else if (e.key === 'ArrowUp' && visible) {
-      e.preventDefault();
-      activeIdx = Math.max(activeIdx - 1, 0);
-      highlight();
-    } else if (e.key === 'Escape') {
-      hide();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (visible) {
-        pick(activeIdx >= 0 ? activeIdx : 0);
-      } else {
-        onEnterFallback();
-      }
-    }
-  });
-}
-
+// Shared by step 2's equipment filter (Borrow/Reserve) - matches a typed
+// keyword against an item's ID, name or category.
 function equipmentLabelMatches(it, query) {
   return `${it.equipmentId} ${it.item} ${it.category || ''}`.toLowerCase().includes(query.toLowerCase());
 }
-
-setupSuggestDropdown(borrowInput, document.getElementById('borrowSuggestList'), {
-  getCandidates: (query) => {
-    if (!query) return [];
-    // Every matching item is shown regardless of availability now - the
-    // status badge (see suggestAvailability) and disabled look tell people
-    // apart from Available ones, rather than hiding them entirely.
-    return inventoryItems
-      .filter((it) => !borrowCart.some((c) => c.equipmentId === it.equipmentId))
-      .filter((it) => equipmentLabelMatches(it, query));
-  },
-  getAvailability: (it) =>
-    suggestAvailability(it, isAdmin ? borrowOnBehalfInput.value.trim() || employeeId : employeeId),
-  // Deliberately leaves the typed search text alone (see setupSuggestDropdown's
-  // pick()) so picking one item doesn't clear the box - the dropdown stays
-  // open with the same query so multiple items can be added back-to-back.
-  onPick: (item) => handleBorrowAdd(item.equipmentId),
-  onEnterFallback: handleBorrowAdd
-});
-
-setupSuggestDropdown(reserveInput, document.getElementById('reserveSuggestList'), {
-  getCandidates: (query) => {
-    if (!query) return [];
-    return inventoryItems
-      .filter((it) => !reserveCart.some((c) => c.equipmentId === it.equipmentId))
-      .filter((it) => equipmentLabelMatches(it, query));
-  },
-  getAvailability: (it) =>
-    suggestAvailability(it, isAdmin ? reserveOnBehalfInput.value.trim() || employeeId : employeeId),
-  // Deliberately leaves the typed search text alone (see setupSuggestDropdown's
-  // pick()) so picking one item doesn't clear the box - the dropdown stays
-  // open with the same query so multiple items can be added back-to-back.
-  onPick: (item) => handleReserveAdd(item.equipmentId),
-  onEnterFallback: handleReserveAdd
-});
 
 // =======================================================
 // VIEW INVENTORY TAB
@@ -1807,6 +1952,13 @@ if (importCsvFile) {
   });
 }
 
+function teamMatches(value, filterValue) {
+  if (!filterValue) return true;
+  const team = String(value || '').trim().toLowerCase();
+  if (filterValue === '__unassigned__') return team === '';
+  return team === filterValue;
+}
+
 function textMatches(value, filterValue) {
   if (!filterValue) return true;
   return String(value || '')
@@ -1840,21 +1992,25 @@ function toLocalTimeInputValue(value) {
 }
 
 async function loadInventory() {
-  inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="9">Loading inventory…</td></tr>';
+  inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Loading inventory…</td></tr>';
   setMessage(inventoryMessage, '', null);
   try {
     const res = await fetch('/api/equipment');
     const items = await res.json();
 
     if (!res.ok) {
-      inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="9">Could not load inventory.</td></tr>';
+      inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Could not load inventory.</td></tr>';
       return;
     }
 
     inventoryItems = items;
     applyInventoryFilters();
+    // Step 2 of the Borrow/Reserve tab is built off this exact dataset, so
+    // every refresh (here, the tab switch above, or its own Refresh button)
+    // keeps its availability badges and cart honest.
+    refreshRequestPicker();
   } catch (err) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="9">Could not reach the server.</td></tr>';
+    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">Could not reach the server.</td></tr>';
   }
 }
 
@@ -1869,6 +2025,10 @@ function applyInventoryFilters() {
     return (
       textMatches(i.equipmentId, inventoryFilters.equipmentId) &&
       textMatches(i.item, inventoryFilters.item) &&
+      // The Team filter is a fixed dropdown rather than free text, so it
+      // needs an exact match - plus its own sentinel for the blank/missing
+      // values that the Borrow/Reserve picker groups under "Unassigned".
+      teamMatches(i.team, inventoryFilters.team) &&
       // Case-insensitive: some existing inventory rows have status stored
       // in uppercase (AVAILABLE/UNAVAILABLE/RESERVED) while the app's own
       // borrow/return/reserve actions write proper case (Available/...) -
@@ -1890,11 +2050,11 @@ function applyInventoryFilters() {
 // database and included in the Word export) - hidden from the web UI only.
 function renderInventoryRows(items) {
   if (inventoryItems.length === 0) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="9">No equipment in the database.</td></tr>';
+    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">No equipment in the database.</td></tr>';
     return;
   }
   if (items.length === 0) {
-    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="9">No equipment matches the current filters.</td></tr>';
+    inventoryBody.innerHTML = '<tr class="empty-row"><td colspan="10">No equipment matches the current filters.</td></tr>';
     return;
   }
 
@@ -1932,6 +2092,18 @@ function renderInventoryRows(items) {
       // value, visible to every user (not just Admin).
       const equipmentIdCell = `<span class="tag-chip">${escapeHtml(i.equipmentId) || '-'}</span>`;
       const itemCell = isAdmin ? adminField(i.equipmentId, 'item', i.item) : escapeHtml(i.item);
+      // Team decides which group an item shows under in step 2 of the
+      // Borrow/Reserve tab, so Admin gets a fixed dropdown here rather than
+      // a text box - a typo would strand the item in a group of its own.
+      // Blank is a real choice: it means "Unassigned" in the picker.
+      const teamCell = isAdmin
+        ? `<select class="comment-input admin-field admin-select" data-equipment-id="${escapeHtml(i.equipmentId)}" data-field="team">
+            <option value="" ${!i.team ? 'selected' : ''}>Unassigned</option>
+            ${TEAM_OPTIONS.map(
+              (opt) => `<option value="${escapeHtml(opt)}" ${opt === i.team ? 'selected' : ''}>${escapeHtml(opt)}</option>`
+            ).join('')}
+          </select>`
+        : escapeHtml(i.team) || '-';
       // A reservation hold (reservedUntil) can be active while the item is
       // physically checked out (status Unavailable, from the reserving
       // employee borrowing it mid-window). Rather than one pill trying to
@@ -1982,6 +2154,7 @@ function renderInventoryRows(items) {
       <tr>
         <td>${equipmentIdCell}</td>
         <td>${itemCell}</td>
+        <td>${teamCell}</td>
         <td>${statusCell}</td>
         <td>
           <input
@@ -2137,26 +2310,27 @@ loadInventory();
 loadMyItems();
 
 // =======================================================
-// BARCODE SCANNER (Borrow & Return)
+// BARCODE SCANNER (Borrow/Reserve & Return)
 // =======================================================
 // Uses the html5-qrcode library (loaded via <script> in dashboard.html) to
 // open the camera, draw a scanning-box outline over the video feed, and
 // decode common barcode/QR formats. A successful scan fills whichever
-// input triggered the scan (Borrow or Return) and runs that tab's normal
-// add flow, so scanned equipment goes through the exact same
-// availability check as a typed-in ID.
-const scanBorrowBtn = document.getElementById('scanBorrowBtn');
+// input triggered the scan and runs that tab's normal add flow, so scanned
+// equipment goes through the exact same availability check as an item
+// ticked by hand. On the Borrow/Reserve tab the "input" is step 2's filter
+// box, so a scan also narrows the picker down to the item it just ticked.
+const scanRequestBtn = document.getElementById('scanRequestBtn');
 const scanReturnBtn = document.getElementById('scanReturnBtn');
-const scanReserveBtn = document.getElementById('scanReserveBtn');
 const scannerModal = document.getElementById('scannerModal');
 const scannerCloseBtn = document.getElementById('scannerCloseBtn');
 const scannerError = document.getElementById('scannerError');
 let activeScanner = null;
 let scanTarget = null; // { input, handler } - which tab requested the scan
 
-scanBorrowBtn.addEventListener('click', () => startScanner(borrowInput, handleBorrowAdd));
+scanRequestBtn.addEventListener('click', () =>
+  startScanner(requestFilterInput, () => requestPickByScan(requestFilterInput.value))
+);
 scanReturnBtn.addEventListener('click', () => startScanner(returnInput, handleReturnAdd));
-scanReserveBtn.addEventListener('click', () => startScanner(reserveInput, handleReserveAdd));
 scannerCloseBtn.addEventListener('click', stopScanner);
 
 async function startScanner(inputEl, addHandler) {

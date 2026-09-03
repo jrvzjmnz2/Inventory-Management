@@ -9,11 +9,11 @@
     "seed": "node seed.js",
     "check-dns": "node check-connection.js",
     "sync-mobile-css": "node scripts/sync-mobile-css.js",
-    "migrate-database": "node scripts/migrate-database.js"
+    "migrate-database": "node scripts/migrate-database.js",
+    "backfill-team": "node scripts/backfill-team.js"
   },
   "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "docx": "^8.5.0",

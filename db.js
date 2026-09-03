@@ -22,6 +22,28 @@ const DB_NAME = process.env.MONGO_DB_NAME || 'inventory';
 let client;
 let db;
 
+// createIndex on a key that already has an index under the same name, but
+// with different options, fails with IndexOptionsConflict rather than
+// updating it in place - this happens once, the first time this runs
+// against a database that still has the old plain unique index from before
+// Microsoft sign-in existed, and is safe to do (it only touches the index
+// structure, not any employee data).
+async function ensureEmployeeIdIndex(db) {
+  const employees = db.collection(COLLECTIONS.EMPLOYEES);
+  const spec = { employeeId: 1 };
+  const options = { unique: true, partialFilterExpression: { employeeId: { $type: 'string' } }, name: 'employeeId_1' };
+  try {
+    await employees.createIndex(spec, options);
+  } catch (err) {
+    if (err.codeName === 'IndexOptionsConflict' || err.code === 85 || err.code === 86) {
+      await employees.dropIndex('employeeId_1');
+      await employees.createIndex(spec, options);
+    } else {
+      throw err;
+    }
+  }
+}
+
 async function connectToDatabase() {
   if (db) return db;
 
@@ -37,7 +59,19 @@ async function connectToDatabase() {
   // Safe to run every startup - createIndex is a no-op if the index already
   // exists, and only fails if there's already duplicate data to resolve.
   try {
-    await db.collection(COLLECTIONS.EMPLOYEES).createIndex({ employeeId: 1 }, { unique: true });
+    // Plain (non-sparse) unique index on employeeId would treat every
+    // document that's missing the field as if it had employeeId: null -
+    // and MongoDB still enforces uniqueness on that shared "null" entry,
+    // so a second document without the field would fail to insert. That
+    // used to be fine when every employee document had a real employeeId
+    // from the moment it was created. Since Microsoft sign-in now creates
+    // an employees document before an admin has tagged its employeeId,
+    // there can legitimately be many such untagged documents at once - so
+    // the constraint is scoped with partialFilterExpression to only the
+    // documents that actually have a string employeeId, and doesn't apply
+    // to the ones still waiting to be tagged.
+    await ensureEmployeeIdIndex(db);
+    await db.collection(COLLECTIONS.EMPLOYEES).createIndex({ email: 1 }, { unique: true, sparse: true });
     await db.collection(COLLECTIONS.EQUIPMENT).createIndex({ equipmentId: 1 }, { unique: true });
   } catch (err) {
     console.warn('Could not ensure unique indexes (existing duplicate data?):', err.message);

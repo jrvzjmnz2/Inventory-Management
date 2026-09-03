@@ -19,11 +19,16 @@
     </div>
   </header>
 
+  <div id="pendingSetupBanner" class="pending-banner hidden">
+    Your account isn't linked to an employee number, so borrowing, reserving and
+    returning are unavailable - ask an admin to sort this out. You can still look
+    around in the meantime.
+  </div>
+
   <nav class="tabs">
     <button class="tab-btn active" data-tab="home" type="button">My Items</button>
-    <button class="tab-btn" data-tab="borrow" type="button">Borrow</button>
+    <button class="tab-btn" data-tab="request" type="button">Borrow / Reserve</button>
     <button class="tab-btn" data-tab="return" type="button">Return</button>
-    <button class="tab-btn" data-tab="reserve" type="button">Reserve</button>
     <button class="tab-btn" data-tab="inventory" type="button">View Inventory</button>
   </nav>
 
@@ -56,64 +61,137 @@
       </table>
     </section>
 
-    <!-- ============ BORROW TAB ============ -->
-    <section id="borrow" class="tab-panel">
-      <h2>Borrow Equipment</h2>
+    <!-- ============ BORROW / RESERVE TAB ============ -->
+    <!-- One tab, two steps. Step 2 stays locked until step 1 is complete -
+         see the requestStep gate in dashboard.js. -->
+    <section id="request" class="tab-panel">
+      <h2>Borrow / Reserve Equipment</h2>
 
-      <div class="input-row">
-        <div class="input-with-suggest">
-          <input type="text" id="borrowInput" placeholder="Enter Equipment ID or item name">
-          <div id="borrowSuggestList" class="suggest-dropdown hidden"></div>
+      <ol class="stepper" id="requestStepper">
+        <li class="stepper-step is-current" data-step="1">
+          <span class="stepper-num">1</span>
+          <span class="stepper-label">Event Details<small>Name, type and dates</small></span>
+        </li>
+        <li class="stepper-step is-locked" data-step="2">
+          <span class="stepper-num">2</span>
+          <span class="stepper-label">Select Equipment<small>Pick by team and category</small></span>
+        </li>
+      </ol>
+
+      <!-- ---------- STEP 1: create the event ---------- -->
+      <div id="requestStep1" class="step-panel active">
+        <div class="form-card">
+          <h3>Event</h3>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">Event Name</span>
+              <input type="text" id="eventNameInput" placeholder="e.g. Cebu Marathon Kit Claiming">
+            </label>
+            <label class="field">
+              <span class="field-label">Event Type</span>
+              <select id="eventTypeSelect" class="field-select">
+                <option value="" disabled selected>Select an event type…</option>
+                <option value="Kit Claiming">Kit Claiming</option>
+                <option value="Entractiv">Entractiv</option>
+                <option value="Timing">Timing</option>
+                <option value="Fulfillment">Fulfillment</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </label>
+          </div>
         </div>
-        <button id="borrowAddBtn" type="button">Add</button>
-        <button id="scanBorrowBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
-        </button>
+
+        <div class="form-card">
+          <h3>Borrow or Reserve</h3>
+          <div class="mode-choice">
+            <label class="mode-option">
+              <input type="radio" name="requestMode" value="borrow">
+              <span class="mode-body">
+                <span class="mode-name">Borrow</span>
+                <span class="mode-hint">Take the equipment out now. Starts at the current date and time.</span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="requestMode" value="reserve">
+              <span class="mode-body">
+                <span class="mode-name">Reserve</span>
+                <span class="mode-hint">Hold the equipment for a future window. Nobody else can take it once it starts.</span>
+              </span>
+            </label>
+          </div>
+
+          <!-- Borrow: start is fixed to "now", only the return date is asked for. -->
+          <div id="borrowSchedule" class="schedule-block hidden">
+            <div class="schedule-now">
+              <span class="field-label">Borrow Start</span>
+              <span class="schedule-now-value" id="borrowStartLabel">-</span>
+              <span class="schedule-now-note">Set automatically to the current date and time.</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Return Date / Event End</span>
+              <div class="input-row">
+                <input type="date" id="borrowEndDateInput">
+                <input type="time" id="borrowEndTimeInput">
+              </div>
+            </div>
+          </div>
+
+          <!-- Reserve: both ends of the window are asked for. -->
+          <div id="reserveSchedule" class="schedule-block hidden">
+            <div class="field">
+              <span class="field-label">Start Date / Event Start</span>
+              <div class="input-row">
+                <input type="date" id="reserveStartDateInput">
+                <input type="time" id="reserveStartTimeInput">
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Return Date / Event End</span>
+              <div class="input-row">
+                <input type="date" id="reserveEndDateInput">
+                <input type="time" id="reserveEndTimeInput">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="requestAdminRow" class="input-row admin-only hidden">
+          <input type="text" id="requestOnBehalfInput" placeholder="Employee ID to borrow/reserve on behalf of (Admin only)">
+        </div>
+
+        <p id="requestStep1Message" class="message"></p>
+        <div class="action-row">
+          <button id="requestNextBtn" type="button" class="primary-btn" disabled>Next: Select Equipment</button>
+        </div>
       </div>
-      <p id="borrowMessage" class="message"></p>
 
-      <div id="borrowAdminRow" class="input-row admin-only hidden">
-        <input type="text" id="borrowOnBehalfInput" placeholder="Employee ID to borrow on behalf of (Admin only)">
+      <!-- ---------- STEP 2: pick the equipment ---------- -->
+      <div id="requestStep2" class="step-panel">
+        <div class="event-summary" id="requestSummary"></div>
+
+        <div class="input-row">
+          <input type="text" id="requestFilterInput" placeholder="Filter by Equipment ID, item or category">
+          <button id="scanRequestBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
+          </button>
+          <button id="refreshRequestBtn" type="button" class="secondary-btn">Refresh</button>
+        </div>
+        <p id="requestSelectMessage" class="message"></p>
+
+        <div id="teamAccordion" class="team-accordion"></div>
+
+        <h3>Miscellaneous Items</h3>
+        <div class="misc-checklist" id="miscChecklist"></div>
+
+        <h3>Your Cart</h3>
+        <div class="request-cart" id="requestCart"></div>
+
+        <div class="action-row">
+          <button id="requestCompleteBtn" type="button" class="primary-btn">Complete</button>
+          <button id="exportBtn" type="button" class="primary-btn" disabled>Export to Word</button>
+        </div>
+        <p id="requestStatusMessage" class="message"></p>
       </div>
-
-      <h3>Equipment Cart</h3>
-      <table class="cart-table">
-        <thead>
-          <tr><th class="admin-only hidden">Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
-        </thead>
-        <tbody id="borrowCartBody">
-          <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Miscellaneous Items</h3>
-      <div class="misc-checklist" id="miscChecklist"></div>
-
-      <h3>Purpose</h3>
-      <div class="input-row">
-        <select id="purposeSelect">
-          <option value="" disabled selected>Select a purpose…</option>
-          <option value="Entractiv">Entractiv</option>
-          <option value="Fulfillment">Fulfillment</option>
-          <option value="Timing">Timing</option>
-          <option value="Bib Production">Bib Production</option>
-          <option value="Office & Admin">Office &amp; Admin</option>
-          <option value="Kit Claiming">Kit Claiming</option>
-        </select>
-        <input type="text" id="eventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
-      </div>
-
-      <h3>Borrow Until</h3>
-      <div class="input-row">
-        <input type="date" id="borrowUntilDateInput">
-        <input type="time" id="borrowUntilTimeInput">
-      </div>
-
-      <div class="action-row">
-        <button id="borrowCompleteBtn" type="button" class="primary-btn">Complete</button>
-        <button id="exportBtn" type="button" class="primary-btn" disabled>Export to Word</button>
-      </div>
-      <p id="borrowStatusMessage" class="message"></p>
     </section>
 
     <!-- ============ RETURN TAB ============ -->
@@ -145,71 +223,6 @@
       <p id="returnStatusMessage" class="message"></p>
     </section>
 
-    <!-- ============ RESERVE TAB ============ -->
-    <section id="reserve" class="tab-panel">
-      <h2>Reserve Equipment</h2>
-
-      <div class="input-row">
-        <div class="input-with-suggest">
-          <input type="text" id="reserveInput" placeholder="Enter Equipment ID or item name">
-          <div id="reserveSuggestList" class="suggest-dropdown hidden"></div>
-        </div>
-        <button id="reserveAddBtn" type="button">Add</button>
-        <button id="scanReserveBtn" type="button" class="scan-btn" aria-label="Scan barcode" title="Scan barcode">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>
-        </button>
-      </div>
-      <p id="reserveMessage" class="message"></p>
-
-      <div id="reserveAdminRow" class="input-row admin-only hidden">
-        <input type="text" id="reserveOnBehalfInput" placeholder="Employee ID to reserve on behalf of (Admin only)">
-      </div>
-
-      <h3>Equipment Cart</h3>
-      <table class="cart-table">
-        <thead>
-          <tr><th class="admin-only hidden">Equipment ID</th><th>Item</th><th>Comment</th><th></th></tr>
-        </thead>
-        <tbody id="reserveCartBody">
-          <tr class="empty-row"><td colspan="4">No equipment added yet.</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Miscellaneous Items</h3>
-      <div class="misc-checklist" id="miscChecklistReserve"></div>
-
-      <h3>Purpose</h3>
-      <div class="input-row">
-        <select id="reservePurposeSelect">
-          <option value="" disabled selected>Select a purpose…</option>
-          <option value="Entractiv">Entractiv</option>
-          <option value="Fulfillment">Fulfillment</option>
-          <option value="Timing">Timing</option>
-          <option value="Bib Production">Bib Production</option>
-          <option value="Office & Admin">Office &amp; Admin</option>
-          <option value="Kit Claiming">Kit Claiming</option>
-        </select>
-        <input type="text" id="reserveEventInput" placeholder="Event (e.g. Cebu Marathon Kit Claiming)">
-      </div>
-
-      <h3>Reservation Start</h3>
-      <div class="input-row">
-        <input type="date" id="reserveStartDateInput">
-        <input type="time" id="reserveStartTimeInput">
-      </div>
-
-      <h3>Reservation End</h3>
-      <div class="input-row">
-        <input type="date" id="reserveEndDateInput">
-        <input type="time" id="reserveEndTimeInput">
-      </div>
-
-      <div class="action-row">
-        <button id="reserveCompleteBtn" type="button" class="primary-btn">Complete</button>
-      </div>
-      <p id="reserveStatusMessage" class="message"></p>
-    </section>
-
     <!-- ============ VIEW INVENTORY TAB ============ -->
     <section id="inventory" class="tab-panel">
       <h2>View Inventory</h2>
@@ -226,6 +239,7 @@
           <tr>
             <th>Equipment ID</th>
             <th>Item</th>
+            <th>Team</th>
             <th>Status</th>
             <th>Comment</th>
             <th>Additional Information</th>
@@ -237,6 +251,14 @@
           <tr class="filter-row">
             <th><input type="text" class="col-filter" data-col="equipmentId" placeholder="Filter…"></th>
             <th><input type="text" class="col-filter" data-col="item" placeholder="Filter…"></th>
+            <th>
+              <select class="col-filter" data-col="team">
+                <option value="">All</option>
+                <option value="entractiv">Entractiv</option>
+                <option value="timing">Timing</option>
+                <option value="__unassigned__">Unassigned</option>
+              </select>
+            </th>
             <th>
               <select class="col-filter" data-col="status">
                 <option value="">All</option>
@@ -254,7 +276,7 @@
           </tr>
         </thead>
         <tbody id="inventoryBody">
-          <tr class="empty-row"><td colspan="9">Loading inventory…</td></tr>
+          <tr class="empty-row"><td colspan="10">Loading inventory…</td></tr>
         </tbody>
       </table>
     </section>
